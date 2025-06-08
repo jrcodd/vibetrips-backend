@@ -245,15 +245,15 @@ async def get_post(post_id: str, current_user = Depends(get_current_user)):
 async def like_post(post_id: str, current_user = Depends(get_current_user)):
     try:
         # Check if already liked
-        existing = supabase.table("post_likes").select("*").eq("user_id", current_user.id).eq("post_id", post_id).execute()
+        existing = supabase.table("post_likes").select("*").eq("user_id", current_user["user"].id).eq("post_id", post_id).execute()
         
         if existing.data:
             # Unlike
-            supabase.table("post_likes").delete().eq("user_id", current_user.id).eq("post_id", post_id).execute()
+            supabase.table("post_likes").delete().eq("user_id", current_user["user"].id).eq("post_id", post_id).execute()
             return {"message": "Post unliked", "liked": False}
         else:
             # Like
-            supabase.table("post_likes").insert({"user_id": current_user.id, "post_id": post_id}).execute()
+            supabase.table("post_likes").insert({"user_id": current_user["user"].id, "post_id": post_id}).execute()
             return {"message": "Post liked", "liked": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -262,15 +262,15 @@ async def like_post(post_id: str, current_user = Depends(get_current_user)):
 async def save_post(post_id: str, current_user = Depends(get_current_user)):
     try:
         # Check if already saved
-        existing = supabase.table("post_saves").select("*").eq("user_id", current_user.id).eq("post_id", post_id).execute()
+        existing = supabase.table("post_saves").select("*").eq("user_id", current_user["user"].id).eq("post_id", post_id).execute()
         
         if existing.data:
             # Unsave
-            supabase.table("post_saves").delete().eq("user_id", current_user.id).eq("post_id", post_id).execute()
+            supabase.table("post_saves").delete().eq("user_id", current_user["user"].id).eq("post_id", post_id).execute()
             return {"message": "Post unsaved", "saved": False}
         else:
             # Save
-            supabase.table("post_saves").insert({"user_id": current_user.id, "post_id": post_id}).execute()
+            supabase.table("post_saves").insert({"user_id": current_user["user"].id, "post_id": post_id}).execute()
             return {"message": "Post saved", "saved": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -280,7 +280,7 @@ async def save_post(post_id: str, current_user = Depends(get_current_user)):
 async def create_place(place: PlaceCreate, current_user = Depends(get_current_user)):
     try:
         place_data = {
-            "created_by": current_user.id,
+            "created_by": current_user["user"].id,
             **place.dict()
         }
         
@@ -309,7 +309,7 @@ async def get_places(category: Optional[str] = None, hidden: Optional[bool] = No
 async def create_event(event: EventCreate, current_user = Depends(get_current_user)):
     try:
         event_data = {
-            "organizer_id": current_user.id,
+            "organizer_id": current_user["user"].id,
             **event.dict()
         }
         
@@ -346,15 +346,15 @@ async def rsvp_event(event_id: str, status: str, current_user = Depends(get_curr
             raise HTTPException(status_code=400, detail="Invalid RSVP status")
         
         # Check if RSVP exists
-        existing = supabase.table("event_rsvps").select("*").eq("user_id", current_user.id).eq("event_id", event_id).execute()
+        existing = supabase.table("event_rsvps").select("*").eq("user_id", current_user["user"].id).eq("event_id", event_id).execute()
         
         if existing.data:
             # Update existing RSVP
-            result = supabase.table("event_rsvps").update({"status": status}).eq("user_id", current_user.id).eq("event_id", event_id).execute()
+            result = supabase.table("event_rsvps").update({"status": status}).eq("user_id", current_user["user"].id).eq("event_id", event_id).execute()
         else:
             # Create new RSVP
             result = supabase.table("event_rsvps").insert({
-                "user_id": current_user.id,
+                "user_id": current_user["user"].id,
                 "event_id": event_id,
                 "status": status
             }).execute()
@@ -367,20 +367,20 @@ async def rsvp_event(event_id: str, status: str, current_user = Depends(get_curr
 @app.post("/api/connections/{user_id}/follow")
 async def follow_user(user_id: str, current_user = Depends(get_current_user)):
     try:
-        if user_id == current_user.id:
+        if user_id == current_user["user"].id:
             raise HTTPException(status_code=400, detail="Cannot follow yourself")
         
         # Check if already following
-        existing = supabase.table("connections").select("*").eq("follower_id", current_user.id).eq("following_id", user_id).execute()
+        existing = supabase.table("connections").select("*").eq("follower_id", current_user["user"].id).eq("following_id", user_id).execute()
         
         if existing.data:
             # Unfollow
-            supabase.table("connections").delete().eq("follower_id", current_user.id).eq("following_id", user_id).execute()
+            supabase.table("connections").delete().eq("follower_id", current_user["user"].id).eq("following_id", user_id).execute()
             return {"message": "User unfollowed", "following": False}
         else:
             # Follow
             supabase.table("connections").insert({
-                "follower_id": current_user.id,
+                "follower_id": current_user["user"].id,
                 "following_id": user_id
             }).execute()
             return {"message": "User followed", "following": True}
@@ -399,7 +399,7 @@ async def get_followers(current_user = Depends(get_current_user)):
                 avatar_url,
                 location
             )
-        """).eq("following_id", current_user.id).execute()
+        """).eq("following_id", current_user["user"].id).execute()
         
         return {"followers": result.data}
     except Exception as e:
@@ -417,7 +417,7 @@ async def get_following(current_user = Depends(get_current_user)):
                 avatar_url,
                 location
             )
-        """).eq("follower_id", current_user.id).execute()
+        """).eq("follower_id", current_user["user"].id).execute()
         
         return {"following": result.data}
     except Exception as e:
@@ -444,7 +444,7 @@ async def get_user_badges(current_user = Depends(get_current_user)):
                 icon,
                 category
             )
-        """).eq("user_id", current_user.id).execute()
+        """).eq("user_id", current_user["user"].id).execute()
         
         return {"user_badges": result.data}
     except Exception as e:
@@ -455,9 +455,9 @@ async def get_user_badges(current_user = Depends(get_current_user)):
 async def get_feed(limit: int = 20, offset: int = 0, current_user = Depends(get_current_user)):
     try:
         # Get posts from followed users and own posts
-        following_result = supabase.table("connections").select("following_id").eq("follower_id", current_user.id).execute()
+        following_result = supabase.table("connections").select("following_id").eq("follower_id", current_user["user"].id).execute()
         following_ids = [conn["following_id"] for conn in following_result.data]
-        following_ids.append(current_user.id)  # Include own posts
+        following_ids.append(current_user["user"].id)  # Include own posts
         
         result = supabase.table("posts").select("""
             *,
