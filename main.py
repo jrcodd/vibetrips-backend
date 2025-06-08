@@ -321,6 +321,8 @@ async def create_event(event: EventCreate, current_user = Depends(get_current_us
 @app.get("/api/events")
 async def get_events(category: Optional[str] = None, current_user = Depends(get_current_user)):
     try:
+        user_id = current_user["user"].id
+        
         # Use admin client to bypass RLS for events (events should be publicly viewable)
         query = supabase_admin.table("events").select("""
             *,
@@ -336,6 +338,21 @@ async def get_events(category: Optional[str] = None, current_user = Depends(get_
             query = query.eq("category", category)
             
         result = query.order("event_date", desc=False).execute()
+        
+        # Get user's RSVP status for each event
+        if result.data:
+            event_ids = [event["id"] for event in result.data]
+            rsvps_result = supabase_admin.table("event_rsvps").select("event_id, status").eq("user_id", user_id).in_("event_id", event_ids).execute()
+            
+            # Create a mapping of event_id to RSVP status
+            rsvp_map = {rsvp["event_id"]: rsvp["status"] for rsvp in rsvps_result.data}
+            
+            # Add RSVP status to each event
+            for event in result.data:
+                event_id = event["id"]
+                rsvp_status = rsvp_map.get(event_id, "not_going")
+                event["user_rsvp_status"] = rsvp_status
+        
         print(f"Events query result: {result.data}")  # Debugging line to check the result
         return {"events": result.data}
     except HTTPException:
