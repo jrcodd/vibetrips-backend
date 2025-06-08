@@ -335,6 +335,7 @@ async def get_events(category: Optional[str] = None, current_user = Depends(get_
             query = query.eq("category", category)
             
         result = query.order("event_date", desc=False).execute()
+        print(result.data)  # Debugging line to check the result
         return {"events": result.data}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
