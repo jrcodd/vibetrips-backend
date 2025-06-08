@@ -308,12 +308,21 @@ async def get_places(category: Optional[str] = None, hidden: Optional[bool] = No
 @app.post("/api/events")
 async def create_event(event: EventCreate, current_user = Depends(get_current_user)):
     try:
+        # Get the current user's username from the profile
+        user_profile = supabase_admin.table("profiles").select("username").eq("id", current_user["user"].id).execute()
+        
+        if not user_profile.data:
+            raise HTTPException(status_code=400, detail="User profile not found")
+        
+        organizer_username = user_profile.data[0]["username"]
+        
         event_data = {
-            "organizer_id": current_user["user"].id,
+            "organizer_id": current_user["user"].id,  # Keep for backward compatibility
+            "organizer_username": organizer_username,
             **event.dict()
         }
         
-        result = supabase.table("events").insert(event_data).execute()
+        result = supabase_admin.table("events").insert(event_data).execute()
         return {"message": "Event created successfully", "event": result.data[0]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -324,37 +333,47 @@ async def get_events(category: Optional[str] = None, current_user = Depends(get_
         user_id = current_user["user"].id
         
         # Use admin client to bypass RLS for events (events should be publicly viewable)
-        query = supabase_admin.table("events").select("""
-            *,
-            profiles:organizer_id (
-                id,
-                username,
-                full_name,
-                avatar_url
-            )
-        """)
+        events_result = supabase_admin.table("events").select("*")
         
         if category:
-            query = query.eq("category", category)
+            events_result = events_result.eq("category", category)
             
-        result = query.order("event_date", desc=False).execute()
+        events_result = events_result.order("event_date", desc=False).execute()
         
-        # Get user's RSVP status for each event
-        if result.data:
-            event_ids = [event["id"] for event in result.data]
+        # Get organizer profiles separately
+        if events_result.data:
+            # Get unique organizer usernames
+            organizer_usernames = list(set([event.get("organizer_username") for event in events_result.data if event.get("organizer_username")]))
+            
+            # Fetch organizer profiles
+            profiles_result = supabase_admin.table("profiles").select("username, full_name, avatar_url").in_("username", organizer_usernames).execute()
+            
+            # Create a mapping of username to profile
+            profile_map = {profile["username"]: profile for profile in profiles_result.data}
+            
+            # Add profile data to events
+            for event in events_result.data:
+                organizer_username = event.get("organizer_username")
+                if organizer_username and organizer_username in profile_map:
+                    event["profiles"] = profile_map[organizer_username]
+                else:
+                    event["profiles"] = None
+            
+            # Get user's RSVP status for each event
+            event_ids = [event["id"] for event in events_result.data]
             rsvps_result = supabase_admin.table("event_rsvps").select("event_id, status").eq("user_id", user_id).in_("event_id", event_ids).execute()
             
             # Create a mapping of event_id to RSVP status
             rsvp_map = {rsvp["event_id"]: rsvp["status"] for rsvp in rsvps_result.data}
             
             # Add RSVP status to each event
-            for event in result.data:
+            for event in events_result.data:
                 event_id = event["id"]
                 rsvp_status = rsvp_map.get(event_id, "not_going")
                 event["user_rsvp_status"] = rsvp_status
         
-        print(f"Events query result: {result.data}")  # Debugging line to check the result
-        return {"events": result.data}
+        print(f"Events query result: {events_result.data}")  # Debugging line to check the result
+        return {"events": events_result.data}
     except HTTPException:
         raise
     except Exception as e:
@@ -371,15 +390,15 @@ async def rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depen
         if status not in ["going", "interested", "not_going"]:
             raise HTTPException(status_code=400, detail="Invalid RSVP status")
         
-        # Check if RSVP exists
-        existing = supabase.table("event_rsvps").select("*").eq("user_id", current_user["user"].id).eq("event_id", event_id).execute()
+        # Check if RSVP exists - use admin client to bypass RLS
+        existing = supabase_admin.table("event_rsvps").select("*").eq("user_id", current_user["user"].id).eq("event_id", event_id).execute()
         
         if existing.data:
-            # Update existing RSVP
-            result = supabase.table("event_rsvps").update({"status": status}).eq("user_id", current_user["user"].id).eq("event_id", event_id).execute()
+            # Update existing RSVP - use admin client
+            result = supabase_admin.table("event_rsvps").update({"status": status}).eq("user_id", current_user["user"].id).eq("event_id", event_id).execute()
         else:
-            # Create new RSVP
-            result = supabase.table("event_rsvps").insert({
+            # Create new RSVP - use admin client
+            result = supabase_admin.table("event_rsvps").insert({
                 "user_id": current_user["user"].id,
                 "event_id": event_id,
                 "status": status
