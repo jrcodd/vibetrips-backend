@@ -321,7 +321,8 @@ async def create_event(event: EventCreate, current_user = Depends(get_current_us
 @app.get("/api/events")
 async def get_events(category: Optional[str] = None, current_user = Depends(get_current_user)):
     try:
-        query = supabase.table("events").select("""
+        # Use admin client to bypass RLS for events (events should be publicly viewable)
+        query = supabase_admin.table("events").select("""
             *,
             profiles:organizer_id (
                 id,
@@ -335,14 +336,21 @@ async def get_events(category: Optional[str] = None, current_user = Depends(get_
             query = query.eq("category", category)
             
         result = query.order("event_date", desc=False).execute()
-        print(result.data)  # Debugging line to check the result
+        print(f"Events query result: {result.data}")  # Debugging line to check the result
         return {"events": result.data}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        print(f"Error in get_events: {str(e)}")  # More detailed error logging
+        raise HTTPException(status_code=500, detail=f"Failed to fetch events: {str(e)}")
+
+class RSVPRequest(BaseModel):
+    status: str
 
 @app.post("/api/events/{event_id}/rsvp")
-async def rsvp_event(event_id: str, status: str, current_user = Depends(get_current_user)):
+async def rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depends(get_current_user)):
     try:
+        status = rsvp_data.status
         if status not in ["going", "interested", "not_going"]:
             raise HTTPException(status_code=400, detail="Invalid RSVP status")
         
