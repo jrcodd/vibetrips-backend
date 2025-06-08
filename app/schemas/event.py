@@ -24,6 +24,17 @@ class EventCreate(BaseModel):
     max_participants: Optional[int] = None
     is_private: bool = False
 
+class FrontendEventCreate(BaseModel):
+    """Schema that matches the frontend event creation data"""
+    title: str
+    description: Optional[str] = None
+    location: str  # Frontend sends location as string
+    category: str
+    price: Optional[str] = None
+    max_attendees: Optional[int] = None
+    image_url: Optional[str] = None
+    event_date: str  # Frontend sends as ISO string
+
 class EventUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None

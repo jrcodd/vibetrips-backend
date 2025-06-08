@@ -17,8 +17,15 @@ async def create_event(
     # Create PostGIS point from latitude and longitude
     point = f"POINT({event_data.location.longitude} {event_data.location.latitude})"
     
-    # Prepare event data
+    # Prepare event data - convert datetime to ISO string for JSON serialization
     event_dict = event_data.dict(exclude={"location"})
+    
+    # Convert datetime fields to ISO string format for Supabase
+    if isinstance(event_dict.get("start_time"), datetime):
+        event_dict["start_time"] = event_dict["start_time"].isoformat()
+    if isinstance(event_dict.get("end_time"), datetime):
+        event_dict["end_time"] = event_dict["end_time"].isoformat()
+    
     event_dict["creator_id"] = current_user["id"]
     event_dict["location"] = point  # PostGIS point
     
