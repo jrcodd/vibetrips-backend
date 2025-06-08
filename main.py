@@ -123,9 +123,14 @@ async def create_profile(profile: UserProfile, current_user = Depends(get_curren
         }
         
         result = supabase_admin.table("profiles").insert(profile_data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create profile")
         return {"message": "Profile created successfully", "profile": result.data[0]}
+    except HTTPException:
+        # Re-raise HTTPExceptions to preserve status codes
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Profile creation failed: {str(e)}")
 
 @app.get("/api/profile")
 async def get_profile(current_user = Depends(get_current_user)):
@@ -134,6 +139,9 @@ async def get_profile(current_user = Depends(get_current_user)):
         if not result.data:
             raise HTTPException(status_code=404, detail="Profile not found")
         return result.data[0]
+    except HTTPException:
+        # Re-raise HTTPExceptions to preserve status codes
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
