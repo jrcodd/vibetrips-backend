@@ -1,0 +1,13 @@
+{
+  "name": "vibetrip-backend",
+  "version": "1.0.0",
+  "description": "VibeTrip API Backend",
+  "scripts": {
+    "dev": "python run.py",
+    "start": "python run.py"
+  },
+  "dependencies": {},
+  "engines": {
+    "python": "3.11"
+  }
+}
