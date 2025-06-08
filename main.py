@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import uuid
 from datetime import datetime
 import json
+import base64
 
 # Load environment variables
 load_dotenv()
@@ -70,7 +71,7 @@ class EventCreate(BaseModel):
     title: str
     description: Optional[str] = None
     image_url: Optional[str] = None
-    event_date: datetime
+    event_date: str  # Accept ISO string and convert to datetime
     location: str
     category: str
     price: Optional[str] = None
@@ -107,6 +108,40 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "VibeTrip API"}
+
+# Image upload endpoint
+@app.post("/api/upload-image")
+async def upload_image(file: UploadFile = File(...), current_user = Depends(get_current_user)):
+    try:
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        # Read file content
+        file_content = await file.read()
+        
+        # Generate unique filename
+        file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+        unique_filename = f"events/{uuid.uuid4()}.{file_extension}"
+        
+        # Upload to Supabase Storage
+        result = supabase_admin.storage.from_("event-images").upload(
+            unique_filename, 
+            file_content,
+            {"content-type": file.content_type}
+        )
+        
+        if result.error:
+            raise HTTPException(status_code=500, detail=f"Upload failed: {result.error}")
+        
+        # Get public URL
+        public_url = supabase_admin.storage.from_("event-images").get_public_url(unique_filename)
+        
+        return {"message": "Image uploaded successfully", "url": public_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 # User Profile endpoints
 @app.post("/api/profile")
@@ -316,14 +351,29 @@ async def create_event(event: EventCreate, current_user = Depends(get_current_us
         
         organizer_username = user_profile.data[0]["username"]
         
+        # Parse the event_date string to datetime
+        try:
+            event_datetime = datetime.fromisoformat(event.event_date.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid event_date format. Use ISO format.")
+        
         event_data = {
             "organizer_id": current_user["user"].id,  # Keep for backward compatibility
             "organizer_username": organizer_username,
-            **event.dict()
+            "title": event.title,
+            "description": event.description,
+            "image_url": event.image_url,
+            "event_date": event_datetime,
+            "location": event.location,
+            "category": event.category,
+            "price": event.price,
+            "max_attendees": event.max_attendees
         }
         
         result = supabase_admin.table("events").insert(event_data).execute()
         return {"message": "Event created successfully", "event": result.data[0]}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
