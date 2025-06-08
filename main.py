@@ -122,7 +122,7 @@ async def create_profile(profile: UserProfile, current_user = Depends(get_curren
             **profile.dict()
         }
         
-        result = supabase.table("profiles").insert(profile_data).execute()
+        result = supabase_admin.table("profiles").insert(profile_data).execute()
         return {"message": "Profile created successfully", "profile": result.data[0]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
