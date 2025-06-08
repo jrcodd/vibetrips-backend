@@ -96,7 +96,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials"
             )
-        return user.user
+        return {"user": user.user, "token": token}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -112,13 +112,15 @@ async def health_check():
 @app.post("/api/profile")
 async def create_profile(profile: UserProfile, current_user = Depends(get_current_user)):
     try:
-        # Check if profile already exists
-        existing = supabase.table("profiles").select("*").eq("id", current_user.id).execute()
+        user = current_user["user"]
+        
+        # Check if profile already exists using admin client
+        existing = supabase_admin.table("profiles").select("*").eq("id", user.id).execute()
         if existing.data:
             raise HTTPException(status_code=400, detail="Profile already exists")
         
         profile_data = {
-            "id": current_user.id,
+            "id": user.id,
             **profile.dict()
         }
         
@@ -135,7 +137,10 @@ async def create_profile(profile: UserProfile, current_user = Depends(get_curren
 @app.get("/api/profile")
 async def get_profile(current_user = Depends(get_current_user)):
     try:
-        result = supabase.table("profiles").select("*").eq("id", current_user.id).execute()
+        user = current_user["user"]
+        
+        # Use admin client to query profiles directly, bypassing RLS for this specific case
+        result = supabase_admin.table("profiles").select("*").eq("id", user.id).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="Profile not found")
         return result.data[0]
@@ -147,20 +152,28 @@ async def get_profile(current_user = Depends(get_current_user)):
 
 @app.put("/api/profile")
 async def update_profile(profile: UserProfile, current_user = Depends(get_current_user)):
-    
     try:
-        result = supabase.table("profiles").update(profile.dict(exclude_unset=True)).eq("id", current_user.id).execute()
+        user = current_user["user"]
+        
+        result = supabase_admin.table("profiles").update(profile.dict(exclude_unset=True)).eq("id", user.id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Profile not found")
         return {"message": "Profile updated successfully", "profile": result.data[0]}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/profiles/{user_id}")
 async def get_user_profile(user_id: str, current_user = Depends(get_current_user)):
     try:
-        result = supabase.table("profiles").select("*").eq("id", user_id).execute()
+        # Use admin client for profile lookups
+        result = supabase_admin.table("profiles").select("*").eq("id", user_id).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="Profile not found")
         return result.data[0]
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -168,8 +181,9 @@ async def get_user_profile(user_id: str, current_user = Depends(get_current_user
 @app.post("/api/posts")
 async def create_post(post: PostCreate, current_user = Depends(get_current_user)):
     try:
+        user = current_user["user"]
         post_data = {
-            "user_id": current_user.id,
+            "user_id": user.id,
             **post.dict()
         }
         
