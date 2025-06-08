@@ -113,19 +113,27 @@ async def health_check():
 @app.post("/api/upload-image")
 async def upload_image(file: UploadFile = File(...), current_user = Depends(get_current_user)):
     try:
+        print(f"Received file upload: filename={file.filename}, content_type={file.content_type}")
+        
         # Validate file type
         if not file.content_type or not file.content_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="File must be an image")
         
         # Check file size (limit to 10MB)
         file_content = await file.read()
+        print(f"File size: {len(file_content)} bytes")
+        
+        if len(file_content) == 0:
+            raise HTTPException(status_code=400, detail="Received empty file")
+        
         max_size = 10 * 1024 * 1024  # 10MB
         if len(file_content) > max_size:
             raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB")
         
         # Generate unique filename
-        file_extension = file.filename.split('.')[-1] if '.' in file.filename and '.' in file.filename else 'jpg'
+        file_extension = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'jpg'
         unique_filename = f"events/{uuid.uuid4()}.{file_extension}"
+        print(f"Generated filename: {unique_filename}")
         
         # Upload to Supabase Storage with better error handling
         try:
