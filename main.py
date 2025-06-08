@@ -383,30 +383,57 @@ async def get_events(category: Optional[str] = None, current_user = Depends(get_
 class RSVPRequest(BaseModel):
     status: str
 
+@app.post("/api/events/{event_id}/rsvp/test")
+async def test_rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depends(get_current_user)):
+    """Simplified RSVP endpoint for testing"""
+    try:
+        return {
+            "message": f"Test RSVP received",
+            "event_id": event_id,
+            "status": rsvp_data.status,
+            "user_id": current_user["user"].id
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.post("/api/events/{event_id}/rsvp")
 async def rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depends(get_current_user)):
     try:
+        print(f"RSVP request received: event_id={event_id}, status={rsvp_data.status}")
+        
         status = rsvp_data.status
         if status not in ["going", "interested", "not_going"]:
             raise HTTPException(status_code=400, detail="Invalid RSVP status")
         
-        # Check if RSVP exists - use admin client to bypass RLS
-        existing = supabase_admin.table("event_rsvps").select("*").eq("user_id", current_user["user"].id).eq("event_id", event_id).execute()
+        user_id = current_user["user"].id
+        print(f"User ID: {user_id}")
         
-        if existing.data:
-            # Update existing RSVP - use admin client
-            result = supabase_admin.table("event_rsvps").update({"status": status}).eq("user_id", current_user["user"].id).eq("event_id", event_id).execute()
-        else:
-            # Create new RSVP - use admin client
-            result = supabase_admin.table("event_rsvps").insert({
-                "user_id": current_user["user"].id,
-                "event_id": event_id,
-                "status": status
-            }).execute()
+        # Simple upsert operation - delete existing and insert new
+        print("Deleting any existing RSVP...")
+        delete_result = supabase_admin.table("event_rsvps").delete().eq("user_id", user_id).eq("event_id", event_id).execute()
+        print(f"Delete result: {delete_result}")
         
-        return {"message": f"RSVP updated to {status}", "rsvp": result.data[0]}
+        # Insert new RSVP
+        print(f"Inserting new RSVP with status: {status}")
+        insert_data = {
+            "user_id": user_id,
+            "event_id": event_id,
+            "status": status
+        }
+        print(f"Insert data: {insert_data}")
+        
+        result = supabase_admin.table("event_rsvps").insert(insert_data).execute()
+        print(f"Insert result: {result}")
+        
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create RSVP")
+        
+        return {"message": f"RSVP updated to {status}", "rsvp": result.data[0] if result.data else {}}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        print(f"Unexpected error in rsvp_event: {type(e).__name__}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"RSVP operation failed: {str(e)}")
 
 # Connections endpoints
 @app.post("/api/connections/{user_id}/follow")
