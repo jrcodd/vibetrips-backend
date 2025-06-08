@@ -139,6 +139,7 @@ async def get_profile(current_user = Depends(get_current_user)):
 
 @app.put("/api/profile")
 async def update_profile(profile: UserProfile, current_user = Depends(get_current_user)):
+    
     try:
         result = supabase.table("profiles").update(profile.dict(exclude_unset=True)).eq("id", current_user.id).execute()
         return {"message": "Profile updated successfully", "profile": result.data[0]}
