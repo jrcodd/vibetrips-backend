@@ -125,14 +125,18 @@ async def upload_image(file: UploadFile = File(...), current_user = Depends(get_
         unique_filename = f"events/{uuid.uuid4()}.{file_extension}"
         
         # Upload to Supabase Storage
-        result = supabase_admin.storage.from_("event-images").upload(
-            unique_filename, 
-            file_content,
-            {"content-type": file.content_type}
-        )
-        
-        if result.error:
-            raise HTTPException(status_code=500, detail=f"Upload failed: {result.error}")
+        try:
+            result = supabase_admin.storage.from_("event-images").upload(
+                unique_filename, 
+                file_content,
+                {"content-type": file.content_type}
+            )
+            
+            # Check if upload was successful
+            if hasattr(result, 'error') and result.error:
+                raise HTTPException(status_code=500, detail=f"Upload failed: {result.error}")
+        except Exception as upload_error:
+            raise HTTPException(status_code=500, detail=f"Upload failed: {str(upload_error)}")
         
         # Get public URL
         public_url = supabase_admin.storage.from_("event-images").get_public_url(unique_filename)
@@ -363,7 +367,7 @@ async def create_event(event: EventCreate, current_user = Depends(get_current_us
             "title": event.title,
             "description": event.description,
             "image_url": event.image_url,
-            "event_date": event_datetime,
+            "event_date": event_datetime,  # Pass datetime object directly
             "location": event.location,
             "category": event.category,
             "price": event.price,
@@ -371,7 +375,18 @@ async def create_event(event: EventCreate, current_user = Depends(get_current_us
         }
         
         result = supabase_admin.table("events").insert(event_data).execute()
-        return {"message": "Event created successfully", "event": result.data[0]}
+        
+        # Convert datetime in response to string for JSON serialization
+        if result.data and len(result.data) > 0:
+            event_response = result.data[0].copy()
+            if 'event_date' in event_response and event_response['event_date']:
+                event_response['event_date'] = event_response['event_date'].isoformat() if hasattr(event_response['event_date'], 'isoformat') else str(event_response['event_date'])
+            if 'created_at' in event_response and event_response['created_at']:
+                event_response['created_at'] = event_response['created_at'].isoformat() if hasattr(event_response['created_at'], 'isoformat') else str(event_response['created_at'])
+        else:
+            event_response = {}
+            
+        return {"message": "Event created successfully", "event": event_response}
     except HTTPException:
         raise
     except Exception as e:
