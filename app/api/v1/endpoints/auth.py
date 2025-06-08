@@ -80,12 +80,46 @@ async def login(credentials: UserLogin):
         profile_response = supabase.table("profiles").select("*").eq("id", auth_response.user.id).execute()
         
         if not profile_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User profile not found"
-            )
-        
-        profile = profile_response.data[0]
+            # Create profile if it doesn't exist
+            user_metadata = auth_response.user.user_metadata or {}
+            base_username = user_metadata.get("username", auth_response.user.email.split("@")[0])
+            full_name = user_metadata.get("full_name", "")
+            
+            # Ensure username is unique
+            username = base_username
+            counter = 1
+            while True:
+                existing_user = supabase.table("profiles").select("id").eq("username", username).execute()
+                if not existing_user.data:
+                    break
+                username = f"{base_username}{counter}"
+                counter += 1
+            
+            profile_data = {
+                "id": str(auth_response.user.id),
+                "username": username,
+                "full_name": full_name,
+                "bio": None,
+                "avatar_url": None,
+                "location": None,
+                "travel_style": None,
+                "interests": [],
+                "places_visited": 0,
+                "events_attended": 0,
+                "badges_earned": 0
+            }
+            
+            create_response = supabase.table("profiles").insert(profile_data).execute()
+            
+            if not create_response.data:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create user profile"
+                )
+            
+            profile = create_response.data[0]
+        else:
+            profile = profile_response.data[0]
         
         # Create access token
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)

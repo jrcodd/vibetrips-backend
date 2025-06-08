@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 class UserCreate(BaseModel):
@@ -14,17 +14,16 @@ class UserLogin(BaseModel):
 
 class User(BaseModel):
     id: str
-    email: str
     username: str
     full_name: Optional[str]
     bio: Optional[str]
     avatar_url: Optional[str]
-    website: Optional[str]
-    location_name: Optional[str]
-    followers_count: int
-    following_count: int
-    posts_count: int
-    is_private: bool
+    location: Optional[str]
+    travel_style: Optional[str]
+    interests: List[str]
+    places_visited: int
+    events_attended: int
+    badges_earned: int
     created_at: datetime
     updated_at: datetime
 
