@@ -50,6 +50,15 @@ class UserProfile(BaseModel):
     travel_style: Optional[str] = None
     interests: Optional[List[str]] = []
 
+class ProfileUpdate(BaseModel):
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    bio: Optional[str] = None
+    avatar_url: Optional[str] = None
+    location: Optional[str] = None
+    travel_style: Optional[str] = None
+    interests: Optional[List[str]] = None
+
 class PostCreate(BaseModel):
     content: str
     image_url: Optional[str] = None
@@ -186,6 +195,75 @@ async def upload_image(file: UploadFile = File(...), current_user = Depends(get_
         placeholder_url = f"https://picsum.photos/400/200?random={uuid.uuid4().hex[:8]}"
         return {"message": "Upload failed, using placeholder", "url": placeholder_url}
 
+# Avatar upload endpoint
+@app.post("/api/upload-avatar")
+async def upload_avatar(file: UploadFile = File(...), current_user = Depends(get_current_user)):
+    try:
+        print(f"Received avatar upload: filename={file.filename}, content_type={file.content_type}")
+        
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        # Check file size (limit to 5MB for avatars)
+        file_content = await file.read()
+        print(f"Avatar file size: {len(file_content)} bytes")
+        
+        if len(file_content) == 0:
+            raise HTTPException(status_code=400, detail="Received empty file")
+        
+        max_size = 5 * 1024 * 1024  # 5MB for avatars
+        if len(file_content) > max_size:
+            raise HTTPException(status_code=400, detail="Avatar too large. Maximum size is 5MB")
+        
+        # Generate unique filename with user ID
+        user_id = current_user["user"].id
+        file_extension = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'jpg'
+        unique_filename = f"avatars/{user_id}/{uuid.uuid4()}.{file_extension}"
+        print(f"Generated avatar filename: {unique_filename}")
+        
+        # Upload to Supabase Storage
+        try:
+            # First try to create the avatars bucket if it doesn't exist
+            try:
+                supabase_admin.storage.create_bucket("avatars", {"public": True})
+            except:
+                pass  # Bucket might already exist
+            
+            # Upload the file
+            result = supabase_admin.storage.from_("avatars").upload(
+                unique_filename, 
+                file_content,
+                {"content-type": file.content_type, "upsert": "true"}
+            )
+            
+            # Check if upload was successful
+            if hasattr(result, 'error') and result.error:
+                raise HTTPException(status_code=500, detail=f"Avatar upload failed: {result.error}")
+                
+        except Exception as upload_error:
+            print(f"Avatar upload error: {str(upload_error)}")
+            raise HTTPException(status_code=500, detail=f"Failed to upload avatar: {str(upload_error)}")
+        
+        # Get public URL
+        try:
+            public_url = supabase_admin.storage.from_("avatars").get_public_url(unique_filename)
+            if isinstance(public_url, str):
+                return {"message": "Avatar uploaded successfully", "url": public_url}
+            else:
+                # If get_public_url returns an object, extract the URL
+                url = getattr(public_url, 'signed_url', None) or getattr(public_url, 'url', None) or str(public_url)
+                return {"message": "Avatar uploaded successfully", "url": url}
+        except Exception as url_error:
+            print(f"Error getting avatar public URL: {str(url_error)}")
+            raise HTTPException(status_code=500, detail="Failed to get avatar URL")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Unexpected avatar upload error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Avatar upload failed: {str(e)}")
+
 # User Profile endpoints
 @app.post("/api/profile")
 async def create_profile(profile: UserProfile, current_user = Depends(get_current_user)):
@@ -229,14 +307,21 @@ async def get_profile(current_user = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.put("/api/profile")
-async def update_profile(profile: UserProfile, current_user = Depends(get_current_user)):
+async def update_profile(profile: ProfileUpdate, current_user = Depends(get_current_user)):
     try:
         user = current_user["user"]
         
-        result = supabase_admin.table("profiles").update(profile.dict(exclude_unset=True)).eq("id", user.id).execute()
+        # Check if username is being changed and if it's already taken
+        update_data = profile.dict(exclude_unset=True)
+        if 'username' in update_data:
+            existing_username = supabase_admin.table("profiles").select("id").eq("username", update_data['username']).neq("id", user.id).execute()
+            if existing_username.data:
+                raise HTTPException(status_code=400, detail="Username already taken")
+        
+        result = supabase_admin.table("profiles").update(update_data).eq("id", user.id).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="Profile not found")
-        return {"message": "Profile updated successfully", "profile": result.data[0]}
+        return result.data[0]
     except HTTPException:
         raise
     except Exception as e:

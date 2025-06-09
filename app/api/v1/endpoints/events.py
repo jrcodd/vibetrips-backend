@@ -5,6 +5,7 @@ from app.core.supabase import supabase
 from app.schemas.event import EventCreate, EventUpdate, Event, EventParticipant, ParticipantStatus
 import uuid
 import json
+from datetime import datetime
 
 router = APIRouter()
 
@@ -158,3 +159,87 @@ async def join_event(
             supabase.table("activities").insert(activity_data).execute()
     
     return response.data[0]
+
+@router.delete("/{event_id}")
+async def delete_event(
+    event_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete an event"""
+    # Check if the event exists and if the user is the creator
+    event_check = supabase.table("events").select(
+        "id, creator_id"
+    ).eq("id", event_id).execute()
+    
+    if not event_check.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found"
+        )
+    
+    event = event_check.data[0]
+    
+    # Only allow creator to delete the event
+    if event["creator_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the event creator can delete this event"
+        )
+    
+    # Delete related data first (due to foreign key constraints)
+    # Delete event participants
+    supabase.table("event_participants").delete().eq("event_id", event_id).execute()
+    
+    # Delete related activities
+    supabase.table("activities").delete().eq("event_id", event_id).execute()
+    
+    # Delete the event
+    response = supabase.table("events").delete().eq("id", event_id).execute()
+    
+    if response.error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(response.error)
+        )
+    
+    return {"message": "Event deleted successfully"}
+
+@router.post("/cleanup-past")
+async def cleanup_past_events(
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete all events that have passed their start time"""
+    from datetime import datetime
+    
+    # Get current time
+    now = datetime.now().isoformat()
+    
+    # Find past events
+    past_events = supabase.table("events").select(
+        "id, title, start_time"
+    ).lt("start_time", now).execute()
+    
+    if not past_events.data:
+        return {"message": "No past events found", "deleted_count": 0}
+    
+    deleted_count = 0
+    
+    for event in past_events.data:
+        try:
+            event_id = event["id"]
+            
+            # Delete related data first
+            supabase.table("event_participants").delete().eq("event_id", event_id).execute()
+            supabase.table("activities").delete().eq("event_id", event_id).execute()
+            
+            # Delete the event
+            delete_response = supabase.table("events").delete().eq("id", event_id).execute()
+            
+            if not delete_response.error:
+                deleted_count += 1
+                
+        except Exception as e:
+            print(f"Error deleting past event {event_id}: {e}")
+            continue
+    
+    return {"message": f"Deleted {deleted_count} past events", "deleted_count": deleted_count}
