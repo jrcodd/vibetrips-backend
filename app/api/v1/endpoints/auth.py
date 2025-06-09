@@ -143,4 +143,14 @@ async def login(credentials: UserLogin):
 @router.get("/me", response_model=User)
 async def get_current_user_info(current_user: dict = Depends(get_current_user)):
     """Get current user information"""
-    return User(**current_user)
+    # Fetch the actual profile data
+    response = supabase.table("profiles").select("*").eq("id", current_user["id"]).execute()
+    
+    if not response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile not found"
+        )
+    
+    profile_data = response.data[0]
+    return User(**profile_data)

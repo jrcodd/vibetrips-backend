@@ -47,12 +47,5 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except JWTError:
         raise credentials_exception
     
-    # Get user from Supabase
-    try:
-        response = supabase.table("profiles").select("*").eq("id", user_id).execute()
-        if not response.data:
-            raise credentials_exception
-        user = response.data[0]
-        return user
-    except Exception:
-        raise credentials_exception
+    # Return user ID for further processing - don't require profile to exist yet
+    return {"id": user_id}
