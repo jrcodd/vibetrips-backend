@@ -20,13 +20,24 @@ router = APIRouter()
 async def get_current_user_profile(current_user: dict = Depends(get_current_user)):
     """Get current user's profile information"""
     try:
+        # Debug logging
+        print(f"DEBUG: Looking for profile with user ID: {current_user['id']}")
+        
         # Fetch profile data from Supabase
         response = supabase.table("profiles").select("*").eq("id", current_user["id"]).execute()
         
+        print(f"DEBUG: Supabase response: {response}")
+        print(f"DEBUG: Response data: {response.data}")
+        print(f"DEBUG: Response error: {getattr(response, 'error', None)}")
+        
         if not response.data:
+            # Try to fetch all profiles to see what's in the table
+            all_profiles = supabase.table("profiles").select("id, username").execute()
+            print(f"DEBUG: All profiles in table: {all_profiles.data}")
+            
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Profile not found"
+                detail=f"Profile not found for user ID: {current_user['id']}"
             )
         
         profile_data = response.data[0]

@@ -40,12 +40,22 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     
     try:
         token = credentials.credentials
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        user_id: str = payload.get("sub")
-        if user_id is None:
+        print(f"DEBUG: Received token: {token[:50]}...")
+        
+        # Verify token with Supabase
+        response = supabase.auth.get_user(token)
+        print(f"DEBUG: Supabase auth response: {response}")
+        
+        if not response.user:
+            print("DEBUG: No user found in Supabase auth response")
             raise credentials_exception
-    except JWTError:
+            
+        user_id = response.user.id
+        print(f"DEBUG: Extracted user_id from Supabase: {user_id}")
+        
+        # Return user ID for further processing
+        return {"id": user_id}
+        
+    except Exception as e:
+        print(f"DEBUG: Authentication error: {e}")
         raise credentials_exception
-    
-    # Return user ID for further processing - don't require profile to exist yet
-    return {"id": user_id}
