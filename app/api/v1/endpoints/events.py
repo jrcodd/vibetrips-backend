@@ -14,7 +14,7 @@ async def create_event(
     event_data: EventCreate,
     current_user: dict = Depends(get_current_user)
 ):
-    """Create a new event"""
+    """Create a new event with insertion sort by start_time"""
     # Create PostGIS point from latitude and longitude
     point = f"POINT({event_data.location.longitude} {event_data.location.latitude})"
     
@@ -29,6 +29,36 @@ async def create_event(
     
     event_dict["creator_id"] = current_user["id"]
     event_dict["location"] = point  # PostGIS point
+    
+    # Get the new event's start time for sorting
+    new_event_time = event_dict["start_time"]
+    
+    # Get all existing events to determine sort position using insertion sort logic
+    existing_events = supabase.table("events").select(
+        "id, start_time, sort_order"
+    ).order("sort_order", desc=False).execute()
+    
+    # Calculate the sort_order using insertion sort algorithm
+    sort_order = 0
+    if existing_events.data:
+        # Find the correct position for insertion
+        for i, event in enumerate(existing_events.data):
+            if new_event_time < event["start_time"]:
+                # Insert before this event
+                sort_order = i
+                break
+            else:
+                # Insert after this event
+                sort_order = i + 1
+        
+        # Update sort_order for all events that need to be shifted
+        for j in range(sort_order, len(existing_events.data)):
+            event_to_update = existing_events.data[j]
+            supabase.table("events").update({
+                "sort_order": event_to_update.get("sort_order", j) + 1
+            }).eq("id", event_to_update["id"]).execute()
+    
+    event_dict["sort_order"] = sort_order
     
     # Create event
     response = supabase.table("events").insert(event_dict).execute()
@@ -67,10 +97,10 @@ async def get_events(
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get events with optional location filtering"""
+    """Get events with optional location filtering, ordered by insertion sort"""
     query = supabase.table("events").select(
         "*, creator:profiles!events_creator_id_fkey(*), participants_count:event_participants(count)"
-    ).order("start_time", desc=False).range(offset, offset + limit - 1)
+    ).order("sort_order", desc=False).range(offset, offset + limit - 1)
     
     # Apply location filtering if coordinates provided
     if latitude is not None and longitude is not None:
@@ -112,6 +142,44 @@ async def get_events(
         events.append(event)
     
     return events
+
+@router.post("/cleanup-past")
+async def cleanup_past_events(
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete all events that have passed their start time"""
+    # Get current time
+    now = datetime.now().isoformat()
+    
+    # Find past events
+    past_events = supabase.table("events").select(
+        "id, title, start_time"
+    ).lt("start_time", now).execute()
+    
+    if not past_events.data:
+        return {"message": "No past events found", "deleted_count": 0}
+    
+    deleted_count = 0
+    
+    for event in past_events.data:
+        try:
+            event_id = event["id"]
+            
+            # Delete related data first
+            supabase.table("event_participants").delete().eq("event_id", event_id).execute()
+            supabase.table("activities").delete().eq("event_id", event_id).execute()
+            
+            # Delete the event
+            delete_response = supabase.table("events").delete().eq("id", event_id).execute()
+            
+            if not delete_response.error:
+                deleted_count += 1
+                
+        except Exception as e:
+            print(f"Error deleting past event {event_id}: {e}")
+            continue
+    
+    return {"message": f"Deleted {deleted_count} past events", "deleted_count": deleted_count}
 
 @router.post("/{event_id}/participants", response_model=EventParticipant)
 async def join_event(
@@ -203,43 +271,3 @@ async def delete_event(
         )
     
     return {"message": "Event deleted successfully"}
-
-@router.post("/cleanup-past")
-async def cleanup_past_events(
-    current_user: dict = Depends(get_current_user)
-):
-    """Delete all events that have passed their start time"""
-    from datetime import datetime
-    
-    # Get current time
-    now = datetime.now().isoformat()
-    
-    # Find past events
-    past_events = supabase.table("events").select(
-        "id, title, start_time"
-    ).lt("start_time", now).execute()
-    
-    if not past_events.data:
-        return {"message": "No past events found", "deleted_count": 0}
-    
-    deleted_count = 0
-    
-    for event in past_events.data:
-        try:
-            event_id = event["id"]
-            
-            # Delete related data first
-            supabase.table("event_participants").delete().eq("event_id", event_id).execute()
-            supabase.table("activities").delete().eq("event_id", event_id).execute()
-            
-            # Delete the event
-            delete_response = supabase.table("events").delete().eq("id", event_id).execute()
-            
-            if not delete_response.error:
-                deleted_count += 1
-                
-        except Exception as e:
-            print(f"Error deleting past event {event_id}: {e}")
-            continue
-    
-    return {"message": f"Deleted {deleted_count} past events", "deleted_count": deleted_count}
