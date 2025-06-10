@@ -588,6 +588,48 @@ async def test_rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = 
     except Exception as e:
         return {"error": str(e)}
 
+@app.post("/api/events/cleanup-past")
+async def cleanup_past_events(current_user = Depends(get_current_user)):
+    """Delete all events that have passed their start time"""
+    try:
+        # Get current time
+        now = datetime.now().isoformat()
+        
+        # Find past events
+        past_events = supabase_admin.table("events").select(
+            "id, title, event_date"
+        ).lt("event_date", now).execute()
+        
+        if not past_events.data:
+            return {"message": "No past events found", "deleted_count": 0}
+        
+        deleted_count = 0
+        
+        for event in past_events.data:
+            try:
+                event_id = event["id"]
+                
+                # Delete related data first (RSVPs)
+                supabase_admin.table("event_rsvps").delete().eq("event_id", event_id).execute()
+                
+                # Delete the event
+                delete_response = supabase_admin.table("events").delete().eq("id", event_id).execute()
+                
+                if not delete_response.error:
+                    deleted_count += 1
+                    print(f"Deleted past event: {event['title']}")
+                    
+            except Exception as e:
+                print(f"Error deleting past event {event_id}: {e}")
+                continue
+        
+        return {"message": f"Deleted {deleted_count} past events", "deleted_count": deleted_count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in cleanup_past_events: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Cleanup operation failed: {str(e)}")
+
 @app.post("/api/events/{event_id}/rsvp")
 async def rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depends(get_current_user)):
     try:
