@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from supabase import create_client, Client
@@ -8,25 +8,18 @@ import os
 from dotenv import load_dotenv
 import uuid
 from datetime import datetime
-import json
-import base64
 
-# Load environment variables
 load_dotenv()
-
-# Initialize FastAPI app
 app = FastAPI(title="VibeTrip API", version="1.0.0")
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize Supabase client
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
 supabase_service_key = os.getenv("SUPABASE_SERVICE_KEY")
@@ -37,10 +30,8 @@ if not all([supabase_url, supabase_key]):
 supabase: Client = create_client(supabase_url, supabase_key)
 supabase_admin: Client = create_client(supabase_url, supabase_service_key)
 
-# Security
 security = HTTPBearer()
 
-# Pydantic models
 class UserProfile(BaseModel):
     username: str
     full_name: Optional[str] = None
@@ -96,8 +87,16 @@ class PlaceCreate(BaseModel):
     image_url: Optional[str] = None
     is_hidden: bool = False
 
-# Authentication dependency
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
+    """
+    Dependency to get the current user from the Supabase auth token.
+
+    Args:
+        credentials (HTTPAuthorizationCredentials): The HTTP authorization credentials from the request.
+
+    Returns:
+        Dict[str, Any]: The current user information and token.
+    """
     try:
         token = credentials.credentials
         user = supabase.auth.get_user(token)
@@ -113,164 +112,94 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             detail="Invalid authentication credentials"
         )
 
-# Health check
 @app.get("/health")
-async def health_check():
+async def health_check() -> Dict[str, str]:
+    """
+    Health check endpoint to verify the API is running.
+
+    Returns:
+        Dict[str, str]: The health status of the API.
+    """
     return {"status": "healthy", "service": "VibeTrip API"}
 
-# Image upload endpoint
 @app.post("/api/upload-image")
-async def upload_image(file: UploadFile = File(...), current_user = Depends(get_current_user)):
-    try:
-        print(f"Received file upload: filename={file.filename}, content_type={file.content_type}")
+async def upload_image(file: UploadFile = File(...), bucket_name: str = Form(...), current_user = Depends(get_current_user)) -> Dict[str, str]:
+    """
+    Upload an image file to a specified Supabase storage bucket.
+    
+    Args:
+        file: The image file to upload
+        bucket_name: The bucket name ('avatars', 'event-images', etc.)
+        current_user: Current authenticated user
         
-        # Validate file type
+    Returns:
+        Dict with message and URL
+    """
+    try:
         if not file.content_type or not file.content_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="File must be an image")
         
-        # Check file size (limit to 10MB)
         file_content = await file.read()
-        print(f"File size: {len(file_content)} bytes")
-        
         if len(file_content) == 0:
-            raise HTTPException(status_code=400, detail="Received empty file")
+            raise HTTPException(status_code=400, detail="Empty file received")
         
-        max_size = 10 * 1024 * 1024  # 10MB
+        # Avatars should be smaller pictures so the limit is 5MB instead of 10MB
+        max_size = 5 * 1024 * 1024 if bucket_name == 'avatars' else 10 * 1024 * 1024
         if len(file_content) > max_size:
-            raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB")
+            max_mb = max_size // (1024 * 1024)
+            raise HTTPException(status_code=400, detail=f"File too large. Max size: {max_mb}MB")
         
-        # Generate unique filename
         file_extension = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'jpg'
-        unique_filename = f"events/{uuid.uuid4()}.{file_extension}"
-        print(f"Generated filename: {unique_filename}")
         
-        # Upload to Supabase Storage with better error handling
-        try:
-            # First try to create the bucket if it doesn't exist
-            try:
-                supabase_admin.storage.create_bucket("event-images", {"public": True})
-            except:
-                pass  # Bucket might already exist
-            
-            # Upload the file
-            result = supabase_admin.storage.from_("event-images").upload(
-                unique_filename, 
-                file_content,
-                {"content-type": file.content_type, "upsert": "true"}
-            )
-            
-            # Check if upload was successful
-            if hasattr(result, 'error') and result.error:
-                # If bucket doesn't exist, try to upload to a different bucket or create one
-                raise HTTPException(status_code=500, detail=f"Upload failed: {result.error}")
-                
-        except Exception as upload_error:
-            # Try alternative: upload to a generic bucket or return a placeholder
-            print(f"Upload error: {str(upload_error)}")
-            
-            # For now, return a placeholder URL to prevent blocking event creation
-            placeholder_url = f"https://picsum.photos/400/200?random={uuid.uuid4().hex[:8]}"
-            return {"message": "Image upload failed, using placeholder", "url": placeholder_url}
+        if bucket_name == 'avatars':
+            unique_filename = f"avatars/{current_user['user'].id}/{uuid.uuid4()}.{file_extension}"
+        else:
+            unique_filename = f"{bucket_name}/{uuid.uuid4()}.{file_extension}"
         
-        # Get public URL
         try:
-            public_url = supabase_admin.storage.from_("event-images").get_public_url(unique_filename)
-            if isinstance(public_url, str):
-                return {"message": "Image uploaded successfully", "url": public_url}
-            else:
-                # If get_public_url returns an object, extract the URL
-                url = getattr(public_url, 'signed_url', None) or getattr(public_url, 'url', None) or str(public_url)
-                return {"message": "Image uploaded successfully", "url": url}
-        except Exception as url_error:
-            print(f"Error getting public URL: {str(url_error)}")
-            # Return a fallback URL
-            fallback_url = f"https://your-supabase-url.supabase.co/storage/v1/object/public/event-images/{unique_filename}"
-            return {"message": "Image uploaded, using fallback URL", "url": fallback_url}
-            
+            supabase_admin.storage.create_bucket(bucket_name, {"public": True})
+        except:
+            pass  # Bucket already exists
+        
+        result = supabase_admin.storage.from_(bucket_name).upload(
+            unique_filename, 
+            file_content,
+            {"content-type": file.content_type, "upsert": "true"}
+        )
+        
+        if hasattr(result, 'error') and result.error:
+            raise HTTPException(status_code=500, detail=f"Upload failed: {result.error}")
+        
+        public_url = supabase_admin.storage.from_(bucket_name).get_public_url(unique_filename)
+        
+        if isinstance(public_url, str):
+            url = public_url
+        else:
+            url = getattr(public_url, 'signed_url', None) or getattr(public_url, 'url', None) or str(public_url)
+        
+        return {"message": "Image uploaded successfully", "url": url}
+        
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Unexpected upload error: {str(e)}")
-        # Return a placeholder to prevent blocking event creation
-        placeholder_url = f"https://picsum.photos/400/200?random={uuid.uuid4().hex[:8]}"
-        return {"message": "Upload failed, using placeholder", "url": placeholder_url}
+        print(f"Upload error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Upload failed")
 
-# Avatar upload endpoint
-@app.post("/api/upload-avatar")
-async def upload_avatar(file: UploadFile = File(...), current_user = Depends(get_current_user)):
-    try:
-        print(f"Received avatar upload: filename={file.filename}, content_type={file.content_type}")
-        
-        # Validate file type
-        if not file.content_type or not file.content_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="File must be an image")
-        
-        # Check file size (limit to 5MB for avatars)
-        file_content = await file.read()
-        print(f"Avatar file size: {len(file_content)} bytes")
-        
-        if len(file_content) == 0:
-            raise HTTPException(status_code=400, detail="Received empty file")
-        
-        max_size = 5 * 1024 * 1024  # 5MB for avatars
-        if len(file_content) > max_size:
-            raise HTTPException(status_code=400, detail="Avatar too large. Maximum size is 5MB")
-        
-        # Generate unique filename with user ID
-        user_id = current_user["user"].id
-        file_extension = file.filename.split('.')[-1] if file.filename and '.' in file.filename else 'jpg'
-        unique_filename = f"avatars/{user_id}/{uuid.uuid4()}.{file_extension}"
-        print(f"Generated avatar filename: {unique_filename}")
-        
-        # Upload to Supabase Storage
-        try:
-            # First try to create the avatars bucket if it doesn't exist
-            try:
-                supabase_admin.storage.create_bucket("avatars", {"public": True})
-            except:
-                pass  # Bucket might already exist
-            
-            # Upload the file
-            result = supabase_admin.storage.from_("avatars").upload(
-                unique_filename, 
-                file_content,
-                {"content-type": file.content_type, "upsert": "true"}
-            )
-            
-            # Check if upload was successful
-            if hasattr(result, 'error') and result.error:
-                raise HTTPException(status_code=500, detail=f"Avatar upload failed: {result.error}")
-                
-        except Exception as upload_error:
-            print(f"Avatar upload error: {str(upload_error)}")
-            raise HTTPException(status_code=500, detail=f"Failed to upload avatar: {str(upload_error)}")
-        
-        # Get public URL
-        try:
-            public_url = supabase_admin.storage.from_("avatars").get_public_url(unique_filename)
-            if isinstance(public_url, str):
-                return {"message": "Avatar uploaded successfully", "url": public_url}
-            else:
-                # If get_public_url returns an object, extract the URL
-                url = getattr(public_url, 'signed_url', None) or getattr(public_url, 'url', None) or str(public_url)
-                return {"message": "Avatar uploaded successfully", "url": url}
-        except Exception as url_error:
-            print(f"Error getting avatar public URL: {str(url_error)}")
-            raise HTTPException(status_code=500, detail="Failed to get avatar URL")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Unexpected avatar upload error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Avatar upload failed: {str(e)}")
-
-# User Profile endpoints
 @app.post("/api/profile")
-async def create_profile(profile: UserProfile, current_user = Depends(get_current_user)):
+async def create_profile(profile: UserProfile, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Create a user profile.
+    
+    Args:
+        profile: The user profile data
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: The created profile data
+    """
     try:
         user = current_user["user"]
         
-        # Check if profile already exists using admin client
         existing = supabase_admin.table("profiles").select("*").eq("id", user.id).execute()
         if existing.data:
             raise HTTPException(status_code=400, detail="Profile already exists")
@@ -291,11 +220,19 @@ async def create_profile(profile: UserProfile, current_user = Depends(get_curren
         raise HTTPException(status_code=500, detail=f"Profile creation failed: {str(e)}")
 
 @app.get("/api/profile")
-async def get_profile(current_user = Depends(get_current_user)):
+async def get_profile(current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Get the current user's profile.
+
+    Args:
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: The user's profile data
+    """
     try:
         user = current_user["user"]
         
-        # Use admin client to query profiles directly, bypassing RLS for this specific case
         result = supabase_admin.table("profiles").select("*").eq("id", user.id).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="Profile not found")
@@ -307,12 +244,22 @@ async def get_profile(current_user = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.put("/api/profile")
-async def update_profile(profile: ProfileUpdate, current_user = Depends(get_current_user)):
+async def update_profile(profile: ProfileUpdate, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Update the current user's profile.
+
+    Args:
+        profile: The updated profile data
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: The updated profile data
+    """
     try:
         user = current_user["user"]
         
         # Check if username is being changed and if it's already taken
-        update_data = profile.dict(exclude_unset=True)
+        update_data = profile.model_dump(exclude_unset=True)
         if 'username' in update_data:
             existing_username = supabase_admin.table("profiles").select("id").eq("username", update_data['username']).neq("id", user.id).execute()
             if existing_username.data:
@@ -328,9 +275,17 @@ async def update_profile(profile: ProfileUpdate, current_user = Depends(get_curr
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/profiles/{user_id}")
-async def get_user_profile(user_id: str, current_user = Depends(get_current_user)):
+async def get_user_profile(user_id: str) -> Dict[str, Any]:
+    """
+    Get a user profile by user ID.
+
+    Args:
+        user_id: The ID of the user whose profile is to be retrieved
+
+    Returns:
+        Dict[str, Any]: The user's profile data
+    """
     try:
-        # Use admin client for profile lookups
         result = supabase_admin.table("profiles").select("*").eq("id", user_id).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="Profile not found")
@@ -340,9 +295,18 @@ async def get_user_profile(user_id: str, current_user = Depends(get_current_user
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# Posts endpoints
 @app.post("/api/posts")
-async def create_post(post: PostCreate, current_user = Depends(get_current_user)):
+async def create_post(post: PostCreate, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Create a new post.
+
+    Args:
+        post: The post data
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: The created post data
+    """
     try:
         user = current_user["user"]
         post_data = {
@@ -356,7 +320,17 @@ async def create_post(post: PostCreate, current_user = Depends(get_current_user)
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/posts")
-async def get_posts(limit: int = 20, offset: int = 0, current_user = Depends(get_current_user)):
+async def get_posts(limit: int = 20, offset: int = 0) -> Dict[str, Any]:
+    """
+    Get a list of posts with pagination.
+
+    Args:
+        limit: The maximum number of posts to return (default 20)
+        offset: The number of posts to skip (default 0)
+
+    Returns:
+        Dict[str, Any]: A dictionary containing the list of posts and pagination info
+    """
     try:
         result = supabase.table("posts").select("""
             *,
@@ -379,7 +353,16 @@ async def get_posts(limit: int = 20, offset: int = 0, current_user = Depends(get
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/posts/{post_id}")
-async def get_post(post_id: str, current_user = Depends(get_current_user)):
+async def get_post(post_id: str) -> Dict[str, Any]:
+    """
+    Get a specific post by ID.
+
+    Args:
+        post_id: The ID of the post to retrieve
+
+    Returns:
+        Dict[str, Any]: The post data
+    """
     try:
         result = supabase.table("posts").select("""
             *,
@@ -405,17 +388,24 @@ async def get_post(post_id: str, current_user = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/posts/{post_id}/like")
-async def like_post(post_id: str, current_user = Depends(get_current_user)):
+async def like_post(post_id: str, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Like or unlike a post.
+
+    Args:
+        post_id: The ID of the post to like/unlike
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: A message indicating the like status
+    """
     try:
-        # Check if already liked
         existing = supabase.table("post_likes").select("*").eq("user_id", current_user["user"].id).eq("post_id", post_id).execute()
         
         if existing.data:
-            # Unlike
             supabase.table("post_likes").delete().eq("user_id", current_user["user"].id).eq("post_id", post_id).execute()
             return {"message": "Post unliked", "liked": False}
         else:
-            # Like
             supabase.table("post_likes").insert({"user_id": current_user["user"].id, "post_id": post_id}).execute()
             return {"message": "Post liked", "liked": True}
     except Exception as e:
@@ -423,24 +413,40 @@ async def like_post(post_id: str, current_user = Depends(get_current_user)):
 
 @app.post("/api/posts/{post_id}/save")
 async def save_post(post_id: str, current_user = Depends(get_current_user)):
+    """
+    Save or unsave a post.
+
+    Args:
+        post_id: The ID of the post to save/unsave
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: A message indicating the save status
+    """
     try:
-        # Check if already saved
         existing = supabase.table("post_saves").select("*").eq("user_id", current_user["user"].id).eq("post_id", post_id).execute()
         
         if existing.data:
-            # Unsave
             supabase.table("post_saves").delete().eq("user_id", current_user["user"].id).eq("post_id", post_id).execute()
             return {"message": "Post unsaved", "saved": False}
         else:
-            # Save
             supabase.table("post_saves").insert({"user_id": current_user["user"].id, "post_id": post_id}).execute()
             return {"message": "Post saved", "saved": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# Places endpoints
 @app.post("/api/places")
-async def create_place(place: PlaceCreate, current_user = Depends(get_current_user)):
+async def create_place(place: PlaceCreate, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Create a new place.
+
+    Args:
+        place: The place data
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: The created place data
+    """
     try:
         place_data = {
             "created_by": current_user["user"].id,
@@ -453,7 +459,17 @@ async def create_place(place: PlaceCreate, current_user = Depends(get_current_us
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/places")
-async def get_places(category: Optional[str] = None, hidden: Optional[bool] = None, current_user = Depends(get_current_user)):
+async def get_places(category: Optional[str] = None, hidden: Optional[bool] = None) -> Dict[str, Any]:
+    """
+    Get a list of places with optional filters.
+
+    Args:
+        category: The category to filter places by (optional)
+        hidden: Whether to include hidden places (optional)
+
+    Returns:
+        Dict[str, Any]: A dictionary containing the list of places and pagination info
+    """
     try:
         query = supabase.table("places").select("*")
         
@@ -467,11 +483,19 @@ async def get_places(category: Optional[str] = None, hidden: Optional[bool] = No
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# Events endpoints
 @app.post("/api/events")
-async def create_event(event: EventCreate, current_user = Depends(get_current_user)):
+async def create_event(event: EventCreate, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Create a new event.
+
+    Args:
+        event: The event data
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: The created event data
+    """
     try:
-        # Get the current user's username from the profile
         user_profile = supabase_admin.table("profiles").select("username").eq("id", current_user["user"].id).execute()
         
         if not user_profile.data:
@@ -479,7 +503,6 @@ async def create_event(event: EventCreate, current_user = Depends(get_current_us
         
         organizer_username = user_profile.data[0]["username"]
         
-        # Parse the event_date string to datetime
         try:
             event_datetime = datetime.fromisoformat(event.event_date.replace('Z', '+00:00'))
         except ValueError:
@@ -520,7 +543,17 @@ async def create_event(event: EventCreate, current_user = Depends(get_current_us
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/events")
-async def get_events(category: Optional[str] = None, current_user = Depends(get_current_user)):
+async def get_events(category: Optional[str] = None, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Get a list of events with optional filters.
+
+    Args:
+        category: The category to filter events by (optional)
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: A dictionary containing the list of events and pagination info
+    """
     try:
         user_id = current_user["user"].id
         
@@ -532,18 +565,13 @@ async def get_events(category: Optional[str] = None, current_user = Depends(get_
             
         events_result = events_result.order("event_date", desc=False).execute()
         
-        # Get organizer profiles separately
         if events_result.data:
-            # Get unique organizer usernames
             organizer_usernames = list(set([event.get("organizer_username") for event in events_result.data if event.get("organizer_username")]))
             
-            # Fetch organizer profiles
             profiles_result = supabase_admin.table("profiles").select("username, full_name, avatar_url").in_("username", organizer_usernames).execute()
             
-            # Create a mapping of username to profile
             profile_map = {profile["username"]: profile for profile in profiles_result.data}
             
-            # Add profile data to events
             for event in events_result.data:
                 organizer_username = event.get("organizer_username")
                 if organizer_username and organizer_username in profile_map:
@@ -551,33 +579,39 @@ async def get_events(category: Optional[str] = None, current_user = Depends(get_
                 else:
                     event["profiles"] = None
             
-            # Get user's RSVP status for each event
             event_ids = [event["id"] for event in events_result.data]
             rsvps_result = supabase_admin.table("event_rsvps").select("event_id, status").eq("user_id", user_id).in_("event_id", event_ids).execute()
             
-            # Create a mapping of event_id to RSVP status
             rsvp_map = {rsvp["event_id"]: rsvp["status"] for rsvp in rsvps_result.data}
             
-            # Add RSVP status to each event
             for event in events_result.data:
                 event_id = event["id"]
                 rsvp_status = rsvp_map.get(event_id, "not_going")
                 event["user_rsvp_status"] = rsvp_status
         
-        print(f"Events query result: {events_result.data}")  # Debugging line to check the result
         return {"events": events_result.data}
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error in get_events: {str(e)}")  # More detailed error logging
+        print(f"Error in get_events: {str(e)}") 
         raise HTTPException(status_code=500, detail=f"Failed to fetch events: {str(e)}")
 
 class RSVPRequest(BaseModel):
     status: str
 
 @app.post("/api/events/{event_id}/rsvp/test")
-async def test_rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depends(get_current_user)):
-    """Simplified RSVP endpoint for testing"""
+async def test_rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Simplified RSVP endpoint for testing
+
+    Args:
+        event_id: The ID of the event to RSVP to
+        rsvp_data: The RSVP data containing status
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: A message indicating the RSVP status
+    """
     try:
         return {
             "message": f"Test RSVP received",
@@ -589,13 +623,16 @@ async def test_rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = 
         return {"error": str(e)}
 
 @app.post("/api/events/cleanup-past")
-async def cleanup_past_events(current_user = Depends(get_current_user)):
-    """Delete all events that have passed their start time"""
+async def cleanup_past_events() -> Dict[str, Any]:
+    """
+    Delete all events that have passed their start time
+    
+    Returns:
+        Dict[str, Any]: A message indicating the number of deleted events
+    """
     try:
-        # Get current time
         now = datetime.now().isoformat()
         
-        # Find past events
         past_events = supabase_admin.table("events").select(
             "id, title, event_date"
         ).lt("event_date", now).execute()
@@ -609,10 +646,8 @@ async def cleanup_past_events(current_user = Depends(get_current_user)):
             try:
                 event_id = event["id"]
                 
-                # Delete related data first (RSVPs)
                 supabase_admin.table("event_rsvps").delete().eq("event_id", event_id).execute()
                 
-                # Delete the event
                 delete_response = supabase_admin.table("events").delete().eq("id", event_id).execute()
                 
                 if not delete_response.error:
@@ -631,7 +666,19 @@ async def cleanup_past_events(current_user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Cleanup operation failed: {str(e)}")
 
 @app.post("/api/events/{event_id}/rsvp")
-async def rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depends(get_current_user)):
+async def rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    RSVP to an event.
+
+    Args:
+        event_id: The ID of the event to RSVP to
+        rsvp_data: The RSVP data containing status
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: A message indicating the RSVP status
+    """
+
     try:
         print(f"RSVP request received: event_id={event_id}, status={rsvp_data.status}")
         
@@ -642,12 +689,10 @@ async def rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depen
         user_id = current_user["user"].id
         print(f"User ID: {user_id}")
         
-        # Simple upsert operation - delete existing and insert new
         print("Deleting any existing RSVP...")
         delete_result = supabase_admin.table("event_rsvps").delete().eq("user_id", user_id).eq("event_id", event_id).execute()
         print(f"Delete result: {delete_result}")
         
-        # Insert new RSVP
         print(f"Inserting new RSVP with status: {status}")
         insert_data = {
             "user_id": user_id,
@@ -669,22 +714,28 @@ async def rsvp_event(event_id: str, rsvp_data: RSVPRequest, current_user = Depen
         print(f"Unexpected error in rsvp_event: {type(e).__name__}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"RSVP operation failed: {str(e)}")
 
-# Connections endpoints
 @app.post("/api/connections/{user_id}/follow")
-async def follow_user(user_id: str, current_user = Depends(get_current_user)):
+async def follow_user(user_id: str, current_user = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Follow or unfollow a user.
+
+    Args:
+        user_id: The ID of the user to follow/unfollow
+        current_user: The currently authenticated user
+
+    Returns:
+        Dict[str, Any]: A message indicating the follow/unfollow status
+    """
     try:
         if user_id == current_user["user"].id:
             raise HTTPException(status_code=400, detail="Cannot follow yourself")
         
-        # Check if already following
         existing = supabase.table("connections").select("*").eq("follower_id", current_user["user"].id).eq("following_id", user_id).execute()
         
         if existing.data:
-            # Unfollow
             supabase.table("connections").delete().eq("follower_id", current_user["user"].id).eq("following_id", user_id).execute()
             return {"message": "User unfollowed", "following": False}
         else:
-            # Follow
             supabase.table("connections").insert({
                 "follower_id": current_user["user"].id,
                 "following_id": user_id
@@ -729,9 +780,8 @@ async def get_following(current_user = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# Badges endpoints
 @app.get("/api/badges")
-async def get_badges(current_user = Depends(get_current_user)):
+async def get_badges():
     try:
         result = supabase.table("badges").select("*").execute()
         return {"badges": result.data}
@@ -756,14 +806,12 @@ async def get_user_badges(current_user = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# Feed endpoint
 @app.get("/api/feed")
-async def get_feed(limit: int = 20, offset: int = 0, current_user = Depends(get_current_user)):
+async def get_feed(limit: int = 20, offset: int = 0, current_user = Depends(get_current_user)) -> Dict[str, Any]:
     try:
-        # Get posts from followed users and own posts
         following_result = supabase.table("connections").select("following_id").eq("follower_id", current_user["user"].id).execute()
         following_ids = [conn["following_id"] for conn in following_result.data]
-        following_ids.append(current_user["user"].id)  # Include own posts
+        following_ids.append(current_user["user"].id)  
         
         result = supabase.table("posts").select("""
             *,

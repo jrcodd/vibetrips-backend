@@ -4,15 +4,21 @@ from app.schemas.user import UserCreate, UserLogin, Token, User
 from app.core.security import create_access_token, get_current_user
 from app.core.config import settings
 from app.core.supabase import supabase
-from gotrue.errors import AuthApiError
 
 router = APIRouter()
 
 @router.post("/register", response_model=Token)
-async def register(user: UserCreate):
-    """Register a new user"""
+async def register(user: UserCreate) -> Token:
+    """
+    Register a new user
+    
+    Args:
+        user (UserCreate): User registration data including email, password, username, and full name.
+
+    Returns:
+        Token: The access token and user information.
+    """
     try:
-        # Create user in Supabase Auth
         auth_response = supabase.auth.sign_up({
             "email": user.email,
             "password": user.password,
@@ -30,7 +36,6 @@ async def register(user: UserCreate):
                 detail="Registration failed"
             )
         
-        # Get created profile
         profile_response = supabase.table("profiles").select("*").eq("id", auth_response.user.id).execute()
         
         if not profile_response.data:
@@ -41,7 +46,6 @@ async def register(user: UserCreate):
         
         profile = profile_response.data[0]
         
-        # Create access token
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         access_token = create_access_token(
             data={"sub": str(auth_response.user.id)},
@@ -54,7 +58,7 @@ async def register(user: UserCreate):
             "user": User(**profile)
         }
         
-    except AuthApiError as e:
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
@@ -62,9 +66,16 @@ async def register(user: UserCreate):
 
 @router.post("/login", response_model=Token)
 async def login(credentials: UserLogin):
-    """Login user"""
+    """
+    Login user
+    
+    Args:
+        credentials (UserLogin): User login data including email and password.
+
+    Returns:
+        Token: The access token and user information.
+    """
     try:
-        # Authenticate with Supabase
         auth_response = supabase.auth.sign_in_with_password({
             "email": credentials.email,
             "password": credentials.password
@@ -76,16 +87,13 @@ async def login(credentials: UserLogin):
                 detail="Invalid credentials"
             )
         
-        # Get user profile
         profile_response = supabase.table("profiles").select("*").eq("id", auth_response.user.id).execute()
         
         if not profile_response.data:
-            # Create profile if it doesn't exist
             user_metadata = auth_response.user.user_metadata or {}
             base_username = user_metadata.get("username", auth_response.user.email.split("@")[0])
             full_name = user_metadata.get("full_name", "")
             
-            # Ensure username is unique
             username = base_username
             counter = 1
             while True:
@@ -121,7 +129,6 @@ async def login(credentials: UserLogin):
         else:
             profile = profile_response.data[0]
         
-        # Create access token
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         access_token = create_access_token(
             data={"sub": str(auth_response.user.id)},
@@ -134,7 +141,7 @@ async def login(credentials: UserLogin):
             "user": User(**profile)
         }
         
-    except AuthApiError as e:
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials"
@@ -142,8 +149,15 @@ async def login(credentials: UserLogin):
 
 @router.get("/me", response_model=User)
 async def get_current_user_info(current_user: dict = Depends(get_current_user)):
-    """Get current user information"""
-    # Fetch the actual profile data
+    """
+    Get current user information
+    
+    Args:
+        current_user (dict): The current authenticated user.
+        
+    Returns:
+        User: The user profile information.
+    """
     response = supabase.table("profiles").select("*").eq("id", current_user["id"]).execute()
     
     if not response.data:

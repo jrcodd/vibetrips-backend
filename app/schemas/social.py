@@ -1,5 +1,5 @@
-from pydantic import BaseModel, UUID4
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
 from datetime import datetime
 from app.schemas.user import User
 

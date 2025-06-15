@@ -26,21 +26,21 @@ class ProfileUpdate(BaseModel):
 router = APIRouter()
 
 @router.get("/me", response_model=User)
-async def get_current_user_profile(current_user: dict = Depends(get_current_user)):
-    """Get current user's profile information"""
+async def get_current_user_profile(current_user: dict = Depends(get_current_user)) -> User:
+    """
+    Get current user's profile information
+    
+    Args:
+        current_user (dict): The current authenticated user.
+    
+    Returns:
+        User: The user profile information.
+    """
     try:
-        # Debug logging
         print(f"DEBUG: Looking for profile with user ID: {current_user['id']}")
         
-        # Fetch profile data from Supabase
         response = supabase.table("profiles").select("*").eq("id", current_user["id"]).execute()
-        
-        print(f"DEBUG: Supabase response: {response}")
-        print(f"DEBUG: Response data: {response.data}")
-        print(f"DEBUG: Response error: {getattr(response, 'error', None)}")
-        
         if not response.data:
-            # Try to fetch all profiles to see what's in the table
             all_profiles = supabase.table("profiles").select("id, username").execute()
             print(f"DEBUG: All profiles in table: {all_profiles.data}")
             
@@ -66,9 +66,9 @@ async def get_current_user_profile(current_user: dict = Depends(get_current_user
             created_at=profile_data["created_at"],
             updated_at=profile_data["updated_at"]
         )
-        
     except HTTPException:
         raise
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -76,10 +76,18 @@ async def get_current_user_profile(current_user: dict = Depends(get_current_user
         )
 
 @router.post("/profile", response_model=User)
-async def create_user_profile(profile_data: ProfileCreate, current_user: dict = Depends(get_current_user)):
-    """Create user profile"""
+async def create_user_profile(profile_data: ProfileCreate, current_user: dict = Depends(get_current_user)) -> User:
+    """
+    Create user profile
+    
+    Args:
+        profile_data (ProfileCreate): The profile data to create.
+        current_user (dict): The current authenticated user.
+
+    Returns:
+        User: The created user profile.
+    """
     try:
-        # Check if profile already exists
         existing_response = supabase.table("profiles").select("id").eq("id", current_user["id"]).execute()
         
         if existing_response.data:
@@ -88,7 +96,6 @@ async def create_user_profile(profile_data: ProfileCreate, current_user: dict = 
                 detail="Profile already exists"
             )
         
-        # Check if username is already taken
         username_response = supabase.table("profiles").select("id").eq("username", profile_data.username).execute()
         
         if username_response.data:
@@ -97,7 +104,6 @@ async def create_user_profile(profile_data: ProfileCreate, current_user: dict = 
                 detail="Username already taken"
             )
         
-        # Create profile
         new_profile = {
             "id": current_user["id"],
             "username": profile_data.username,
@@ -147,10 +153,18 @@ async def create_user_profile(profile_data: ProfileCreate, current_user: dict = 
         )
 
 @router.put("/profile", response_model=User)
-async def update_user_profile(profile_data: ProfileUpdate, current_user: dict = Depends(get_current_user)):
-    """Update current user's profile"""
+async def update_user_profile(profile_data: ProfileUpdate, current_user: dict = Depends(get_current_user)) -> User:
+    """
+    Update current user's profile
+    
+    Args:
+        profile_data (ProfileUpdate): The profile data to update.
+        current_user (dict): The current authenticated user.
+
+    Returns:
+        User: The updated user profile.
+    """
     try:
-        # Check if profile exists
         existing_response = supabase.table("profiles").select("*").eq("id", current_user["id"]).execute()
         
         if not existing_response.data:
@@ -161,7 +175,6 @@ async def update_user_profile(profile_data: ProfileUpdate, current_user: dict = 
         
         current_profile = existing_response.data[0]
         
-        # Check if username is being changed and if it's already taken
         if profile_data.username and profile_data.username != current_profile["username"]:
             username_response = supabase.table("profiles").select("id").eq("username", profile_data.username).execute()
             
@@ -171,7 +184,6 @@ async def update_user_profile(profile_data: ProfileUpdate, current_user: dict = 
                     detail="Username already taken"
                 )
         
-        # Build update dict with only provided fields
         update_data = {}
         if profile_data.username is not None:
             update_data["username"] = profile_data.username
@@ -189,7 +201,6 @@ async def update_user_profile(profile_data: ProfileUpdate, current_user: dict = 
             update_data["interests"] = profile_data.interests
         
         if not update_data:
-            # No fields to update, return current profile
             return User(
                 id=current_profile["id"],
                 username=current_profile["username"],
@@ -206,7 +217,6 @@ async def update_user_profile(profile_data: ProfileUpdate, current_user: dict = 
                 updated_at=current_profile["updated_at"]
             )
         
-        # Update profile
         response = supabase.table("profiles").update(update_data).eq("id", current_user["id"]).execute()
         
         if not response.data:
@@ -242,10 +252,17 @@ async def update_user_profile(profile_data: ProfileUpdate, current_user: dict = 
         )
 
 @router.get("/{user_id}", response_model=User)
-async def get_user_profile(user_id: str, current_user: dict = Depends(get_current_user)):
-    """Get specific user's profile information"""
+async def get_user_profile(user_id: str) -> User:
+    """
+    Get specific user's profile information
+    
+    Args:
+        user_id (str): The ID of the user whose profile to fetch.
+        
+    Returns:
+        User: The user profile information.
+    """
     try:
-        # Fetch profile data from Supabase
         response = supabase.table("profiles").select("*").eq("id", user_id).execute()
         
         if not response.data:

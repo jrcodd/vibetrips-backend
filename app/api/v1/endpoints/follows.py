@@ -9,20 +9,24 @@ import uuid
 router = APIRouter()
 
 @router.post("/", response_model=Follow)
-async def follow_user(
-    follow_data: FollowCreate,
-    current_user: dict = Depends(get_current_user)
-):
-    """Follow a user"""
-    
-    # Check if user is trying to follow themselves
+async def follow_user(follow_data: FollowCreate, current_user: dict = Depends(get_current_user)) -> Follow:
+    """
+    Follow a user
+
+    Args:
+        follow_data (FollowCreate): The data required to follow a user, including the ID of the user to follow.
+        current_user (dict): The current authenticated user.
+
+    Returns:
+        Follow: The created follow relationship.
+    """
+
     if current_user["id"] == follow_data.following_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot follow yourself"
         )
     
-    # Check if follow relationship already exists
     check_response = supabase.table("follows").select("*").eq(
         "follower_id", current_user["id"]
     ).eq("following_id", follow_data.following_id).execute()
@@ -33,7 +37,6 @@ async def follow_user(
             detail="You are already following this user"
         )
     
-    # Create follow relationship
     follow_id = str(uuid.uuid4())
     follow_data_dict = {
         "id": follow_id,
@@ -49,7 +52,6 @@ async def follow_user(
             detail="Failed to follow user"
         )
     
-    # Record activity
     activity_data = {
         "user_id": follow_data.following_id,
         "actor_id": current_user["id"],
@@ -61,13 +63,18 @@ async def follow_user(
     return Follow(**response.data[0])
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def unfollow_user(
-    user_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """Unfollow a user"""
+async def unfollow_user(user_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    """
+    Unfollow a user
     
-    # Delete follow relationship
+    Args:
+        user_id (str): The ID of the user to unfollow.
+        current_user (dict): The current authenticated user.
+        
+    Returns:
+        dict: A message indicating the success of the unfollow action.
+    """
+    
     response = supabase.table("follows").delete().eq(
         "follower_id", current_user["id"]
     ).eq("following_id", user_id).execute()
@@ -79,16 +86,21 @@ async def unfollow_user(
         )
 
 @router.get("/followers", response_model=List[User])
-async def get_followers(
-    user_id: Optional[str] = None,
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    current_user: dict = Depends(get_current_user)
-):
-    """Get user followers"""
+async def get_followers(user_id: Optional[str] = None, limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), current_user: dict = Depends(get_current_user)):
+    """
+    Get user followers
+    
+    Args:
+        user_id (Optional[str]): The ID of the user whose followers to retrieve. If not provided, uses the current user's ID.
+        limit (int): The maximum number of followers to return. Defaults to 20, max 100.
+        offset (int): The number of followers to skip before starting to collect the result set. Defaults to 0.
+        current_user (dict): The current authenticated user.
+        
+    Returns:
+        List[User]: A list of users who are following the specified user.
+    """
     target_id = user_id or current_user["id"]
     
-    # Get followers
     response = supabase.from_("follows").select(
         "profiles!follower_id(*)"
     ).eq("following_id", target_id).range(offset, offset + limit - 1).execute()
@@ -99,7 +111,6 @@ async def get_followers(
             detail=str(response.error)
         )
     
-    # Extract user data from the join
     followers = [item["profiles"] for item in response.data]
     return followers
 
@@ -113,7 +124,6 @@ async def get_following(
     """Get users that a user is following"""
     target_id = user_id or current_user["id"]
     
-    # Get following
     response = supabase.from_("follows").select(
         "profiles!following_id(*)"
     ).eq("follower_id", target_id).range(offset, offset + limit - 1).execute()
@@ -124,6 +134,5 @@ async def get_following(
             detail=str(response.error)
         )
     
-    # Extract user data from the join
     following = [item["profiles"] for item in response.data]
     return following

@@ -13,7 +13,6 @@ class ActionType(str, Enum):
     PROFILE_COMPLETE = "profile_complete"
     LOCATION_VISIT = "location_visit"
 
-# Points awarded for each action type
 POINTS_MAP = {
     ActionType.POST_CREATE: 10,
     ActionType.POST_LIKE: 2,
@@ -26,20 +25,24 @@ POINTS_MAP = {
     ActionType.LOCATION_VISIT: 5
 }
 
-async def award_points(
-    user_id: str,
-    action_type: ActionType,
-    reference_id: Optional[str] = None
-) -> Dict[str, Any]:
-    """Award points to a user for a specific action"""
+async def award_points(user_id: str, action_type: ActionType, reference_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Award points to a user for a specific action
     
-    # Get points for the action
+    Args:
+        user_id (str): The ID of the user to award points to.
+        action_type (ActionType): The type of action that triggered the points award.
+        reference_id (Optional[str]): An optional reference ID for the action, e.g., post ID, comment ID, etc.
+    
+    Returns:
+        Dict[str, Any]: A dictionary containing the success status, points awarded, total points, and any new badges awarded.
+    """
+
     points = POINTS_MAP.get(action_type, 0)
     
     if points == 0:
         return {"success": False, "message": "Invalid action type"}
     
-    # Create points transaction
     transaction_data = {
         "user_id": user_id,
         "amount": points,
@@ -52,25 +55,18 @@ async def award_points(
     if response.error:
         return {"success": False, "message": str(response.error)}
     
-    # Get user's updated points
     user_response = supabase.table("profiles").select("points").eq("id", user_id).execute()
     
     if user_response.error or not user_response.data:
         return {"success": True, "points_awarded": points}
     
-    # Get newly awarded badges
     badges_response = supabase.table("user_badges").select(
         "badges(*)"
     ).eq("user_id", user_id).order("awarded_at", desc=True).limit(5).execute()
     
-    # Check for new badges
     new_badges = []
     if badges_response.data:
-        # Take most recent badge if it was just awarded
         latest_badge = badges_response.data[0]
-        
-        # Check if badge was awarded in the last 5 seconds
-        # This is a heuristic - if it's close to the current time, it was likely from this transaction
         new_badges = [latest_badge["badges"]]
     
     return {
@@ -81,7 +77,15 @@ async def award_points(
     }
 
 async def get_user_badges(user_id: str) -> List[Dict[str, Any]]:
-    """Get all badges for a user"""
+    """
+    Get all badges for a user
+    
+    Args:
+        user_id (str): The ID of the user to get badges for.
+
+    Returns:
+        List[Dict[str, Any]]: A list of badges earned by the user, including when they were awarded.
+    """
     
     response = supabase.table("user_badges").select(
         "*, badges(*)"
@@ -90,7 +94,6 @@ async def get_user_badges(user_id: str) -> List[Dict[str, Any]]:
     if response.error:
         return []
     
-    # Process badges
     badges = []
     for user_badge in response.data:
         badge = user_badge["badges"]
@@ -100,8 +103,16 @@ async def get_user_badges(user_id: str) -> List[Dict[str, Any]]:
     return badges
 
 async def get_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
-    """Get leaderboard of users with highest points"""
+    """
+    Get leaderboard of users with highest points
+
+    Args:
+        limit (int): The maximum number of users to return in the leaderboard. Defaults to 10, max 100.
     
+    Returns:
+        List[Dict[str, Any]]: A list of users with their points, ordered by points descending.
+    """
+
     response = supabase.table("profiles").select(
         "id, username, full_name, avatar_url, points"
     ).order("points", desc=True).limit(limit).execute()
@@ -110,4 +121,3 @@ async def get_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
         return []
     
     return response.data
-
