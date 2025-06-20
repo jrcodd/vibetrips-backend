@@ -478,9 +478,10 @@ async def get_recommended_users(
         
         # Extract the token from the request header
         auth_header = request.headers.get("Authorization")
+        
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
-            
+            print(f"DEBUG: Extracted token: {token[:50]}...")  # Print first 50 characters for debugging
             # Set the authentication context on Supabase client
             supabase.auth.set_session(access_token=token, refresh_token="")
             print("DEBUG: Set Supabase auth session")
