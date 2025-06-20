@@ -477,12 +477,28 @@ async def get_recommended_users(
         following_response = supabase.table("follows").select("following_id").eq(
             "follower_id", current_user["id"]
         ).execute()
-        
+        # Add this right after the try: line
+        print("DEBUG: Testing database connection...")
+
+        # Test basic connection
+        test_response = supabase.table("profiles").select("count").execute()
+        print(f"DEBUG: Table count query: {test_response}")
+
+        # Test if we can see the table structure
+        try:
+            schema_test = supabase.table("profiles").select("*").limit(1).execute()
+            print(f"DEBUG: Schema test result: {schema_test}")
+            if hasattr(schema_test, 'error') and schema_test.error:
+                print(f"DEBUG: Schema test error: {schema_test.error}")
+        except Exception as e:
+            print(f"DEBUG: Exception testing schema: {e}")
         following_ids = [f["following_id"] for f in following_response.data] if following_response.data else []
         print(f"DEBUG: Already following: {following_ids}")
         following_ids.append(current_user["id"])  # Exclude current user
         print(f"DEBUG: Excluding these IDs: {following_ids}")
         
+        # Add this debug line to verify which project you're connecting to
+        print(f"DEBUG: Supabase URL: {supabase.supabase_url}")
         # Get all profiles first to debug
         all_profiles = supabase.table("profiles").select("*").execute()
         print(f"DEBUG: All profiles: {all_profiles.data}")
