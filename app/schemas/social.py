@@ -1,9 +1,13 @@
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
+from enum import Enum
 from app.schemas.user import User
 
 class FollowCreate(BaseModel):
+    following_id: str
+
+class FollowRequestCreate(BaseModel):
     following_id: str
 
 class Follow(BaseModel):
@@ -12,11 +16,20 @@ class Follow(BaseModel):
     following_id: str
     created_at: datetime
 
+class FollowRequest(BaseModel):
+    id: str
+    requester_id: str
+    following_id: str
+    status: str
+    created_at: datetime
+
 class ActivityType(str, Enum):
     POST = "post"
     LIKE = "like"
     COMMENT = "comment"
     FOLLOW = "follow"
+    FOLLOW_REQUEST = "follow_request"
+    FOLLOW_REQUEST_ACCEPTED = "follow_request_accepted"
     EVENT_CREATE = "event_create"
     EVENT_JOIN = "event_join"
 
