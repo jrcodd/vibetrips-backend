@@ -343,7 +343,7 @@ async def get_follow_requests(current_user: dict = Depends(get_current_user)):
             "id, created_at, profiles!requester_id(*)"
         ).eq("requested_id", current_user["id"]).eq("status", "pending").execute()
         
-        if response.error:
+        if not response.data and hasattr(response, 'error') and response.error:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(response.error)
@@ -482,7 +482,7 @@ async def get_recommended_users(
         # Get users excluding those already followed
         response = supabase.table("profiles").select("*").not_.in_("id", following_ids).limit(limit).execute()
         
-        if response.error:
+        if not response.data and hasattr(response, 'error') and response.error:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(response.error)
