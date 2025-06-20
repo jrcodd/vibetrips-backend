@@ -484,7 +484,7 @@ async def get_recommended_users(
         print(f"DEBUG: Excluding these IDs: {following_ids}")
         
         # Get all profiles first to debug
-        all_profiles = supabase.table("profiles").select("id, username").execute()
+        all_profiles = supabase.table("profiles").select("*").execute()
         print(f"DEBUG: All profiles: {all_profiles.data}")
         
         # Get users excluding those already followed
