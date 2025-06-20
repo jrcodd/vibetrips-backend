@@ -480,7 +480,7 @@ async def get_recommended_users(
         following_ids.append(current_user["id"])  # Exclude current user
         
         # Get users excluding those already followed
-        response = supabase.table("profiles").select("*").not_.in_("id", following_ids).limit(limit).execute()
+        response = supabase.table("profiles").select("*").not_.in_("id", following_ids).execute()
         print(f"Suggested: {response.data}")
         if not response.data and hasattr(response, 'error') and response.error:
             raise HTTPException(
