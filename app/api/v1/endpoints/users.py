@@ -506,7 +506,21 @@ async def get_recommended_users(
         # Get users excluding those already followed
         response = supabase.table("profiles").select("*").not_.in_("id", following_ids).limit(limit).execute()
         print(f"DEBUG: Recommended profiles: {response.data}")
+        current_session = supabase.auth.get_session()
+        print(f"DEBUG: Current session: {current_session}")
         
+        # Try setting the auth context explicitly
+        # First, get the token from your get_current_user dependency
+        from fastapi import Request
+        # You'll need to modify this based on how you extract the token
+        
+        # Alternative: Test with a fresh client using the user's token
+        print("DEBUG: Testing query with explicit auth...")
+        
+        # Test the query
+        all_profiles = supabase.table("profiles").select("*").execute()
+        print(f"DEBUG: All profiles: {all_profiles.data}")
+        print(f"DEBUG: All profiles error: {getattr(all_profiles, 'error', None)}")
         if not response.data and hasattr(response, 'error') and response.error:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
