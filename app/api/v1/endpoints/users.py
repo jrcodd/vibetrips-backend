@@ -5,6 +5,8 @@ from app.core.security import get_current_user
 from app.core.supabase import supabase
 from pydantic import BaseModel
 import uuid
+from fastapi import Request
+
 
 class ProfileCreate(BaseModel):
     username: str
@@ -466,11 +468,26 @@ async def get_follow_status(user_id: str, current_user: dict = Depends(get_curre
 
 @router.get("/recommended")
 async def get_recommended_users(
+    request: Request,
     limit: int = Query(10, ge=1, le=50),
     current_user: dict = Depends(get_current_user)
 ):
     """Get recommended users to follow"""
     try:
+        print(f"DEBUG: Getting recommendations for user {current_user['id']}")
+        
+        # Extract the token from the request header
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            
+            # Set the authentication context on Supabase client
+            supabase.auth.set_session(access_token=token, refresh_token="")
+            print("DEBUG: Set Supabase auth session")
+        
+        # Now your queries will work with RLS
+        all_profiles = supabase.table("profiles").select("*").execute()
+        print(f"DEBUG: All profiles: {all_profiles.data}")
         print(f"DEBUG: Getting recommendations for user {current_user['id']}")
         
         # Get users that current user is not following and exclude current user
@@ -511,7 +528,6 @@ async def get_recommended_users(
         
         # Try setting the auth context explicitly
         # First, get the token from your get_current_user dependency
-        from fastapi import Request
         # You'll need to modify this based on how you extract the token
         
         # Alternative: Test with a fresh client using the user's token
