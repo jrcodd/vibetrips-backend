@@ -471,17 +471,26 @@ async def get_recommended_users(
 ):
     """Get recommended users to follow"""
     try:
+        print(f"DEBUG: Getting recommendations for user {current_user['id']}")
+        
         # Get users that current user is not following and exclude current user
         following_response = supabase.table("follows").select("following_id").eq(
             "follower_id", current_user["id"]
         ).execute()
         
         following_ids = [f["following_id"] for f in following_response.data] if following_response.data else []
+        print(f"DEBUG: Already following: {following_ids}")
         following_ids.append(current_user["id"])  # Exclude current user
+        print(f"DEBUG: Excluding these IDs: {following_ids}")
+        
+        # Get all profiles first to debug
+        all_profiles = supabase.table("profiles").select("id, username").execute()
+        print(f"DEBUG: All profiles: {all_profiles.data}")
         
         # Get users excluding those already followed
-        response = supabase.table("profiles").select("*").not_.in_("id", following_ids).execute()
-        print(f"Suggested: {response.data}")
+        response = supabase.table("profiles").select("*").not_.in_("id", following_ids).limit(limit).execute()
+        print(f"DEBUG: Recommended profiles: {response.data}")
+        
         if not response.data and hasattr(response, 'error') and response.error:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
