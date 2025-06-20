@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form, Query
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from supabase import create_client, Client
@@ -806,97 +806,8 @@ async def get_user_badges(current_user = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/v1/users/recommended")
-async def get_recommended_users(limit: int = 10, current_user = Depends(get_current_user)) -> Dict[str, Any]:
-    """
-    Get recommended users to follow.
-
-    Args:
-        limit: Maximum number of recommended users to return.
-        current_user: The currently authenticated user.
-
-    Returns:
-        Dict[str, Any]: A list of recommended users.
-    """
-    try:
-        user_id = current_user["user"].id
-        
-        # Fetch users who are active, excluding the current user
-        recommended_query = supabase.table("profiles").select("*").neq(
-            "id", user_id
-        ).order("posts_count", ascending=False).limit(limit).execute()
-        
-        # Filter out users already following or requested
-        following_query = supabase.table("connections").select("following_id").eq(
-            "follower_id", user_id
-        ).execute()
-        
-        following_ids = set(item["following_id"] for item in following_query.data or [])
-        
-        recommended_users = [
-            user for user in recommended_query.data 
-            if user["id"] not in following_ids
-        ]
-        
-        return {"users": recommended_users}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/v1/users/{user_id}/follow-status")
-async def get_follow_status(
-    user_id: str, 
-    current_user = Depends(get_current_user)
-) -> str:
-    """
-    Get the follow status between the current user and another user.
-
-    Args:
-        user_id: The ID of the user to check follow status with.
-        current_user: The currently authenticated user.
-
-    Returns:
-        str: The follow status ('following', 'requested', or 'not_following').
-    """
-    try:
-        # Check if already following
-        following_query = supabase.table("connections").select("*").eq(
-            "follower_id", current_user["user"].id
-        ).eq("following_id", user_id).execute()
-        
-        if following_query.data:
-            return "following"
-        
-        return "not_following"
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/v1/users/follow-requests")
-async def get_follow_requests(current_user = Depends(get_current_user)) -> Dict[str, Any]:
-    """
-    Get incoming follow requests for the current user.
-
-    Args:
-        current_user: The currently authenticated user.
-
-    Returns:
-        Dict[str, Any]: A list of follow requests.
-    """
-    try:
-        requests_query = supabase.table("follow_requests").select("""
-            *,
-            profiles:requester_id (
-                id,
-                username,
-                full_name,
-                avatar_url
-            )
-        """).eq("following_id", current_user["user"].id).eq("status", "pending").execute()
-        
-        return {"requests": requests_query.data}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
 @app.get("/api/feed")
+async def get_feed(limit: int = 20, offset: int = 0, current_user = Depends(get_current_user)) -> Dict[str, Any]:
     try:
         following_result = supabase.table("connections").select("following_id").eq("follower_id", current_user["user"].id).execute()
         following_ids = [conn["following_id"] for conn in following_result.data]
