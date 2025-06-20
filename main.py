@@ -8,9 +8,14 @@ import os
 from dotenv import load_dotenv
 import uuid
 from datetime import datetime
+from app.api.v1.endpoints import users, follows
 
 load_dotenv()
 app = FastAPI(title="VibeTrip API", version="1.0.0")
+
+# Include v1 routers
+app.include_router(users.router, prefix="/v1/users", tags=["users"])
+app.include_router(follows.router, prefix="/v1/follows", tags=["follows"])
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import Optional, List
 from app.schemas.user import User
 from app.core.security import get_current_user
 from app.core.supabase import supabase
 from pydantic import BaseModel
+import uuid
 
 class ProfileCreate(BaseModel):
     username: str
@@ -293,4 +294,264 @@ async def get_user_profile(user_id: str) -> User:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch profile: {str(e)}"
+        )
+
+# Follow request endpoints
+@router.post("/{user_id}/follow-request")
+async def request_follow(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Send a follow request to a user"""
+    try:
+        if current_user["id"] == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot follow yourself"
+            )
+        
+        # Check if already following
+        existing_follow = supabase.table("follows").select("*").eq(
+            "follower_id", current_user["id"]
+        ).eq("following_id", user_id).execute()
+        
+        if existing_follow.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Already following this user"
+            )
+        
+        # Check if request already exists
+        existing_request = supabase.table("follow_requests").select("*").eq(
+            "requester_id", current_user["id"]
+        ).eq("requested_id", user_id).execute()
+        
+        if existing_request.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Follow request already sent"
+            )
+        
+        # Create follow request
+        request_data = {
+            "id": str(uuid.uuid4()),
+            "requester_id": current_user["id"],
+            "requested_id": user_id,
+            "status": "pending"
+        }
+        
+        response = supabase.table("follow_requests").insert(request_data).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to send follow request"
+            )
+        
+        return {"message": "Follow request sent", "status": "requested"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send follow request: {str(e)}"
+        )
+
+@router.delete("/{user_id}/follow-request")
+async def cancel_follow_request(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Cancel a follow request"""
+    try:
+        response = supabase.table("follow_requests").delete().eq(
+            "requester_id", current_user["id"]
+        ).eq("requested_id", user_id).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Follow request not found"
+            )
+        
+        return {"message": "Follow request cancelled", "status": "cancelled"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel follow request: {str(e)}"
+        )
+
+@router.get("/follow-requests")
+async def get_follow_requests(current_user: dict = Depends(get_current_user)):
+    """Get pending follow requests for current user"""
+    try:
+        response = supabase.table("follow_requests").select(
+            "id, created_at, profiles!requester_id(*)"
+        ).eq("requested_id", current_user["id"]).eq("status", "pending").execute()
+        
+        if response.error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(response.error)
+            )
+        
+        requests = []
+        for item in response.data:
+            requests.append({
+                "id": item["id"],
+                "user": item["profiles"],
+                "created_at": item["created_at"]
+            })
+        
+        return {"requests": requests}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get follow requests: {str(e)}"
+        )
+
+@router.post("/{user_id}/follow-request/accept")
+async def accept_follow_request(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Accept a follow request"""
+    try:
+        # Find the request
+        request_response = supabase.table("follow_requests").select("*").eq(
+            "requester_id", user_id
+        ).eq("requested_id", current_user["id"]).eq("status", "pending").execute()
+        
+        if not request_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Follow request not found"
+            )
+        
+        # Create follow relationship
+        follow_data = {
+            "id": str(uuid.uuid4()),
+            "follower_id": user_id,
+            "following_id": current_user["id"]
+        }
+        
+        follow_response = supabase.table("follows").insert(follow_data).execute()
+        
+        if not follow_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create follow relationship"
+            )
+        
+        # Delete the request
+        supabase.table("follow_requests").delete().eq(
+            "requester_id", user_id
+        ).eq("requested_id", current_user["id"]).execute()
+        
+        return {"message": "Follow request accepted", "status": "accepted"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to accept follow request: {str(e)}"
+        )
+
+@router.post("/{user_id}/follow-request/ignore")
+async def ignore_follow_request(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Ignore a follow request"""
+    try:
+        response = supabase.table("follow_requests").delete().eq(
+            "requester_id", user_id
+        ).eq("requested_id", current_user["id"]).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Follow request not found"
+            )
+        
+        return {"message": "Follow request ignored", "status": "ignored"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to ignore follow request: {str(e)}"
+        )
+
+@router.get("/{user_id}/follow-status")
+async def get_follow_status(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Get follow status for a specific user"""
+    try:
+        # Check if following
+        follow_response = supabase.table("follows").select("*").eq(
+            "follower_id", current_user["id"]
+        ).eq("following_id", user_id).execute()
+        
+        if follow_response.data:
+            return "following"
+        
+        # Check if request pending
+        request_response = supabase.table("follow_requests").select("*").eq(
+            "requester_id", current_user["id"]
+        ).eq("requested_id", user_id).eq("status", "pending").execute()
+        
+        if request_response.data:
+            return "requested"
+        
+        return "not_following"
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get follow status: {str(e)}"
+        )
+
+@router.get("/recommended")
+async def get_recommended_users(
+    limit: int = Query(10, ge=1, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get recommended users to follow"""
+    try:
+        # Get users that current user is not following and exclude current user
+        following_response = supabase.table("follows").select("following_id").eq(
+            "follower_id", current_user["id"]
+        ).execute()
+        
+        following_ids = [f["following_id"] for f in following_response.data] if following_response.data else []
+        following_ids.append(current_user["id"])  # Exclude current user
+        
+        # Get users excluding those already followed
+        response = supabase.table("profiles").select("*").not_.in_("id", following_ids).limit(limit).execute()
+        
+        if response.error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(response.error)
+            )
+        
+        users = []
+        for user in response.data:
+            # Get post count for user
+            post_count_response = supabase.table("posts").select("id").eq("user_id", user["id"]).execute()
+            post_count = len(post_count_response.data) if post_count_response.data else 0
+            
+            users.append({
+                "id": user["id"],
+                "username": user["username"],
+                "profile_picture": user.get("avatar_url"),
+                "bio": user.get("bio"),
+                "posts_count": post_count
+            })
+        
+        return {"users": users}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get recommended users: {str(e)}"
         )

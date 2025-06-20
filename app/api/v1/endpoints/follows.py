@@ -62,7 +62,7 @@ async def follow_user(follow_data: FollowCreate, current_user: dict = Depends(ge
     
     return Follow(**response.data[0])
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{user_id}", status_code=status.HTTP_200_OK)
 async def unfollow_user(user_id: str, current_user: dict = Depends(get_current_user)) -> dict:
     """
     Unfollow a user
