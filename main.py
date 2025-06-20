@@ -735,13 +735,13 @@ async def follow_user(user_id: str, current_user = Depends(get_current_user)) ->
         if user_id == current_user["user"].id:
             raise HTTPException(status_code=400, detail="Cannot follow yourself")
         
-        existing = supabase.table("connections").select("*").eq("follower_id", current_user["user"].id).eq("following_id", user_id).execute()
+        existing = supabase.table("follows").select("*").eq("follower_id", current_user["user"].id).eq("following_id", user_id).execute()
         
         if existing.data:
-            supabase.table("connections").delete().eq("follower_id", current_user["user"].id).eq("following_id", user_id).execute()
+            supabase.table("follows").delete().eq("follower_id", current_user["user"].id).eq("following_id", user_id).execute()
             return {"message": "User unfollowed", "following": False}
         else:
-            supabase.table("connections").insert({
+            supabase.table("follows").insert({
                 "follower_id": current_user["user"].id,
                 "following_id": user_id
             }).execute()
@@ -752,7 +752,7 @@ async def follow_user(user_id: str, current_user = Depends(get_current_user)) ->
 @app.get("/api/connections/followers")
 async def get_followers(current_user = Depends(get_current_user)):
     try:
-        result = supabase.table("connections").select("""
+        result = supabase.table("follows").select("""
             *,
             profiles:follower_id (
                 id,
@@ -770,7 +770,7 @@ async def get_followers(current_user = Depends(get_current_user)):
 @app.get("/api/connections/following")
 async def get_following(current_user = Depends(get_current_user)):
     try:
-        result = supabase.table("connections").select("""
+        result = supabase.table("follows").select("""
             *,
             profiles:following_id (
                 id,
@@ -814,7 +814,7 @@ async def get_user_badges(current_user = Depends(get_current_user)):
 @app.get("/api/feed")
 async def get_feed(limit: int = 20, offset: int = 0, current_user = Depends(get_current_user)) -> Dict[str, Any]:
     try:
-        following_result = supabase.table("connections").select("following_id").eq("follower_id", current_user["user"].id).execute()
+        following_result = supabase.table("follows").select("following_id").eq("follower_id", current_user["user"].id).execute()
         following_ids = [conn["following_id"] for conn in following_result.data]
         following_ids.append(current_user["user"].id)  
         
