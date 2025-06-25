@@ -56,21 +56,21 @@ class ProfileUpdate(BaseModel):
     interests: Optional[List[str]] = None
 
 class PostCreate(BaseModel):
-    content: str
-    image_url: Optional[str] = None
-    place_id: Optional[str] = None
-    post_type: str = "story"
+    title: str
+    description: str
+    location: Optional[str] = None
+    picture_url: Optional[str] = None
 
 class PostResponse(BaseModel):
     id: str
-    content: str
-    image_url: Optional[str]
-    post_type: str
+    title: str
+    description: str
+    location: Optional[str]
+    picture_url: Optional[str]
     likes_count: int
-    saves_count: int
     created_at: datetime
-    user: Dict[str, Any]
-    place: Optional[Dict[str, Any]] = None
+    updated_at: datetime
+    user_id: str
 
 class EventCreate(BaseModel):
     title: str
@@ -344,12 +344,6 @@ async def get_posts(limit: int = 20, offset: int = 0) -> Dict[str, Any]:
                 username,
                 full_name,
                 avatar_url
-            ),
-            places:place_id (
-                id,
-                name,
-                location,
-                category
             )
         """).order("created_at", desc=True).range(offset, offset + limit - 1).execute()
         
@@ -376,12 +370,6 @@ async def get_post(post_id: str) -> Dict[str, Any]:
                 username,
                 full_name,
                 avatar_url
-            ),
-            places:place_id (
-                id,
-                name,
-                location,
-                category
             )
         """).eq("id", post_id).execute()
         
@@ -825,12 +813,6 @@ async def get_feed(limit: int = 20, offset: int = 0, current_user = Depends(get_
                 username,
                 full_name,
                 avatar_url
-            ),
-            places:place_id (
-                id,
-                name,
-                location,
-                category
             )
         """).in_("user_id", following_ids).order("created_at", desc=True).range(offset, offset + limit - 1).execute()
         
